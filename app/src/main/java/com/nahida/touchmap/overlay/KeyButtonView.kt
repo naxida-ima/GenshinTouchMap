@@ -74,7 +74,7 @@ class KeyButtonView(
 
         // 编辑模式：画映射目标指示线
         if (editing && key.targetX >= 0f) {
-            paint.color = 0x88FF5722
+            paint.color = 0x88FF5722.toInt()
             paint.strokeWidth = 2f
             canvas.drawLine(cx, cy, key.targetX * screenW - x, key.targetY * screenH - y, paint)
         }

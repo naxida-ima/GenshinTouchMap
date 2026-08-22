@@ -78,7 +78,7 @@ class JoystickView(
         // 摇杆帽
         val knobR = baseRadius * 0.45f
         knobPaint.style = Paint.Style.FILL
-        knobPaint.color = 0x99FFFFFF
+        knobPaint.color = 0x99FFFFFF.toInt()
         canvas.drawCircle(cx + knobX, cy + knobY, knobR, knobPaint)
         knobPaint.style = Paint.Style.STROKE
         knobPaint.strokeWidth = 2f
@@ -88,7 +88,7 @@ class JoystickView(
         // 编辑模式：画映射中心指示
         if (editing) {
             basePaint.style = Paint.Style.STROKE
-            basePaint.color = 0x88FF5722
+            basePaint.color = 0x88FF5722.toInt()
             canvas.drawLine(cx, cy, targetCX() - x, targetCY() - y, basePaint)
         }
     }

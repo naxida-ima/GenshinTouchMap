@@ -99,8 +99,8 @@ private fun MainScreen() {
 
     // 收集配置流
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.launch { ConfigStore.keysFlow(context).collect { keys = it } }
-        kotlinx.coroutines.launch { ConfigStore.editModeFlow(context).collect { editMode = it } }
+        launch { ConfigStore.keysFlow(context).collect { keys = it } }
+        launch { ConfigStore.editModeFlow(context).collect { editMode = it } }
     }
 
     // 请求通知权限（Android 13+）

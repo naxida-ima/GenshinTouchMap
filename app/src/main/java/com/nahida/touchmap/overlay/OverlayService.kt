@@ -40,7 +40,7 @@ class OverlayService : Service() {
         private const val NOTIF_ID = 1001
 
         @Volatile
-        private var instance: OverlayService? = null
+        var instance: OverlayService? = null
 
         fun isRunning(): Boolean = instance != null
 
@@ -230,7 +230,7 @@ class OverlayService : Service() {
 
     private fun showPicker(key: VirtualKey) {
         val mask = View(this)
-        mask.setBackgroundColor(0x99000000)
+        mask.setBackgroundColor(0x99000000.toInt())
         mask.setOnTouchListener { _, e ->
             if (e.action == MotionEvent.ACTION_UP) {
                 val tx = (e.x / screenW).coerceIn(0f, 1f)
@@ -298,6 +298,10 @@ class OverlayService : Service() {
 fun Int.dp(context: Context): Int =
     (this * context.resources.displayMetrics.density).roundToInt()
 
+/** Float 版 dp -> px（按键尺寸是百分比外的 dp 数值） */
+fun Float.dp(context: Context): Int =
+    (this * context.resources.displayMetrics.density).roundToInt()
+
 /** 悬浮球 */
 class FloatBallView(
     context: Context,
@@ -307,14 +311,14 @@ class FloatBallView(
 ) : View(context) {
 
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (editing) 0xCCFF9800 else 0xCC00BFFF
+        color = if (editing) 0xCCFF9800.toInt() else 0xCC00BFFF.toInt()
         textSize = 14 * context.resources.displayMetrics.density
         textAlign = android.graphics.Paint.Align.CENTER
     }
 
     fun setEditing(e: Boolean) {
         editing = e
-        paint.color = if (editing) 0xCCFF9800 else 0xCC00BFFF
+        paint.color = if (editing) 0xCCFF9800.toInt() else 0xCC00BFFF.toInt()
         invalidate()
     }
 

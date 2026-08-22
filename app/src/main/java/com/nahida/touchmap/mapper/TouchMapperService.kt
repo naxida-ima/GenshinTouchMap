@@ -130,12 +130,12 @@ class TouchMapperService : AccessibilityService(), TouchInjector {
                 // 原地按住：从当前点出发保持不动
                 path.moveTo(f.x, f.y)
                 path.lineTo(f.x, f.y)
-                builder.addStroke(StrokeDescription(path, 0, HOLD_MS))
+                builder.addStroke(GestureDescription.StrokeDescription(path, 0, HOLD_MS))
             } else {
                 // 移动：从上次同步位置移动到当前位置
                 path.moveTo(f.lastX, f.lastY)
                 path.lineTo(f.x, f.y)
-                builder.addStroke(StrokeDescription(path, 0, MOVE_MS))
+                builder.addStroke(GestureDescription.StrokeDescription(path, 0, MOVE_MS))
             }
             f.lastX = f.x
             f.lastY = f.y
