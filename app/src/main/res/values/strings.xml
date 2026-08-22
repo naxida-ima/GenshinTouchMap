@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">提瓦特触控映射</string>
+    <string name="accessibility_label">提瓦特触控映射（触摸模拟服务）</string>
+    <string name="accessibility_description">用于将自定义虚拟按键的触摸转译为对游戏的模拟点击、长按与摇杆拖动。</string>
+    <string name="overlay_notification_title">触控映射运行中</string>
+    <string name="overlay_notification_text">悬浮按键已激活，打开原神即可使用</string>
+    <string name="btn_start">启动悬浮层</string>
+    <string name="btn_stop">停止悬浮层</string>
+    <string name="btn_add_key">新建按键</string>
+    <string name="btn_add_joystick">新建摇杆</string>
+    <string name="btn_edit_mode">编辑模式</string>
+    <string name="btn_run_mode">运行模式</string>
+</resources>
