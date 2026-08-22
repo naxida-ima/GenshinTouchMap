@@ -55,6 +55,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
+    // View 版 Material 组件（提供 Theme.Material3.* 应用主题）
+    implementation("com.google.android.material:material:1.12.0")
+
     // DataStore（替代 SharedPreferences）
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
