@@ -292,6 +292,11 @@ class OverlayService : Service() {
         params.y = (centerYPercent * screenH - sizePx / 2f).roundToInt()
         runCatching { wm.updateViewLayout(view, params) }
     }
+
+    /** 编辑模式拖动结束后持久化按键位置 */
+    fun saveKeys() {
+        scope.launch { ConfigStore.saveKeys(this@OverlayService, keys) }
+    }
 }
 
 /** dp -> px */
