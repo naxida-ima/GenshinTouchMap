@@ -1,3 +1,6 @@
+import java.io.File
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -14,16 +17,41 @@ android {
         // Android 13 (API 33) 及以上设备均可安装；targetSdk 用 2026 年最新
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            val ksB64 = System.getenv("KEYSTORE_BASE64")
+            if (!ksB64.isNullOrEmpty()) {
+                // CI：从环境变量解码统一签名 keystore（GitHub Secrets 注入）
+                val ksFile = File(
+                    System.getenv("RUNNER_TEMP") ?: System.getProperty("java.io.tmpdir"),
+                    "genshintouchmap-release.keystore"
+                )
+                ksFile.writeBytes(Base64.getDecoder().decode(ksB64))
+                storeFile = ksFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            } else {
+                // 本地无密钥：fallback debug 签名保证可构建
+                val debug = signingConfigs.getByName("debug")
+                storeFile = debug.storeFile
+                storePassword = debug.storePassword
+                keyAlias = debug.keyAlias
+                keyPassword = debug.keyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // 无密钥环境（CI）也保证可安装：release 用 debug 签名（v1+v2）
-            signingConfig = signingConfigs.getByName("debug")
+            // 统一签名：CI 用固定 keystore，本地 fallback debug
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
