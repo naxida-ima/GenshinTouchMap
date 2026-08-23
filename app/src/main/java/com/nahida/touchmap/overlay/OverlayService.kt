@@ -96,6 +96,14 @@ class OverlayService : Service() {
                 svc.rebuildAll()
             }
         }
+
+        /** 应用手柄预置布局（原神 7.0 官方键位） */
+        fun applyGamepadPreset(context: Context) {
+            CoroutineScope(Dispatchers.Main).launch {
+                ConfigStore.saveKeys(context, com.nahida.touchmap.model.GAMEPAD_PRESET)
+            }
+            instance?.rebuildAll()
+        }
     }
 
     private lateinit var wm: WindowManager
@@ -124,6 +132,9 @@ class OverlayService : Service() {
     /** 手柄映射模式（假映射）：触摸转手柄输入注入，控件输出归一化向量 */
     @Volatile
     private var gamepadMode = false
+
+    /** 手柄模式视角滑动层：全屏透明，滑动注入右摇杆轴（AXIS_RX/RY） */
+    private var viewLayer: View? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -178,6 +189,8 @@ class OverlayService : Service() {
         keyWindows.clear()
         targetWindows.forEach { (_, v) -> runCatching { wm.removeView(v) } }
         targetWindows.clear()
+        runCatching { viewLayer?.let { wm.removeView(it) } }
+        viewLayer = null
         runCatching { floatBallView?.let { wm.removeView(it) } }
         floatBallView = null
         runCatching { pickerView?.let { wm.removeView(it) } }
@@ -198,6 +211,10 @@ class OverlayService : Service() {
             showPicker(pickingKey!!)
             return
         }
+        // 手柄模式：先铺全屏视角滑动层（下层，空白区域滑动转视角）
+        if (gamepadMode) {
+            addViewLayer()
+        }
         // 按键 / 摇杆窗口（手柄映射/双机发射模式：控件输出归一化向量）
         val vectorMode = remoteMode || gamepadMode
         keys.forEachIndexed { index, key ->
@@ -216,9 +233,49 @@ class OverlayService : Service() {
         addFloatBall()
     }
 
+    /**
+     * 手柄模式视角滑动层：全屏透明窗口（控件之下）。
+     * 手指在空白区域滑动 → 注入右摇杆轴（fingerId=1, AXIS_RX/RY），松手回中。
+     */
+    private fun addViewLayer() {
+        val layer = View(this)
+        layer.setBackgroundColor(0x00000000)
+        layer.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    viewDownX = e.rawX
+                    viewDownY = e.rawY
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (e.rawX - viewDownX) / (screenW * 0.4f)
+                    val dy = (e.rawY - viewDownY) / (screenH * 0.4f)
+                    com.nahida.touchmap.mapper.EngineManager.gamepad()
+                        ?.move(1, dx.coerceIn(-1f, 1f), dy.coerceIn(-1f, 1f))
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    com.nahida.touchmap.mapper.EngineManager.gamepad()?.move(1, 0f, 0f)
+                }
+            }
+            true
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        runCatching {
+            wm.addView(layer, params)
+            viewLayer = layer
+        }
+    }
+
     /** 目标标记窗口：显示在原神对应按键的位置（不可交互，仅可视化） */
-    private fun addTargetWindow(key: VirtualKey) {
-        val wPx = key.width.dp(this)
+    private fun addTargetWindow(key: VirtualKey) {        val wPx = key.width.dp(this)
         val hPx = key.height.dp(this)
         val marker = TargetMarkerView(this, key)
         val params = WindowManager.LayoutParams(
@@ -343,8 +400,9 @@ class OverlayService : Service() {
         }
     }
 
-    /** 进入选点模式：为指定按键设置映射目标 */
+    /** 进入选点模式：为指定按键设置映射目标（手柄模式无需选点，跳过） */
     private fun onPickRequest(key: VirtualKey) {
+        if (gamepadMode) return
         pickingKey = key
         applyWindows()
     }

@@ -31,26 +31,31 @@ class GamepadInjector : TouchInjector {
         private const val TAG = "GamepadInjector"
         private const val MODE_WAIT_FOR_FINISH = 1
 
-        // Xbox 布局手柄键码（原神手柄模式）
-        const val KEY_A = KeyEvent.KEYCODE_BUTTON_A        // 跳跃
-        const val KEY_X = KeyEvent.KEYCODE_BUTTON_X        // 攻击
-        const val KEY_B = KeyEvent.KEYCODE_BUTTON_B        // 元素战技
-        const val KEY_Y = KeyEvent.KEYCODE_BUTTON_Y        // 元素爆发
-        const val KEY_L1 = KeyEvent.KEYCODE_BUTTON_L1      // 切角色左
-        const val KEY_R1 = KeyEvent.KEYCODE_BUTTON_R1      // 切角色右
-        const val KEY_L2 = KeyEvent.KEYCODE_BUTTON_L2      // 冲刺/加速（按住）
-        const val KEY_R2 = KeyEvent.KEYCODE_BUTTON_R2      // 瞄准（按住）
+        // Xbox 布局手柄键码（原神 7.0 至冬射击模式官方布局）
+        const val KEY_A = KeyEvent.KEYCODE_BUTTON_A        // 跳跃 / 翻越掩体
+        const val KEY_X = KeyEvent.KEYCODE_BUTTON_X        // 拾取 / 交互
+        const val KEY_Y = KeyEvent.KEYCODE_BUTTON_Y        // 枪械技能（小技能）
+        const val KEY_B = KeyEvent.KEYCODE_BUTTON_B        // 装填弹药（换弹）
+        const val KEY_RB = KeyEvent.KEYCODE_BUTTON_R1      // 冲刺 / 滑铲（疾跑）
+        const val KEY_DPAD_UP = KeyEvent.KEYCODE_DPAD_UP           // 切枪械方案1（主武器）
+        const val KEY_DPAD_RIGHT = KeyEvent.KEYCODE_DPAD_RIGHT     // 切枪械方案2（副武器）
+        const val KEY_DPAD_LEFT = KeyEvent.KEYCODE_DPAD_LEFT       // 切换榴晶（大招）
 
-        /** keyId -> 手柄键码（默认：0/1 为摇杆，2+ 为按键） */
+        /**
+         * keyId -> 手柄键码（0=左摇杆移动，1=右摇杆视角，2+ 按键）
+         * 布局对应原神 7.0 手柄官方键位：
+         * 2=跳跃(A) 3=交互(X) 4=技能(Y) 5=换弹(B) 6=冲刺(RB)
+         * 7=主武器(十字键上) 8=副武器(十字键右) 9=榴晶(十字键左)
+         */
         val DEFAULT_KEYMAP = mapOf(
-            2 to KEY_X,   // 攻击
-            3 to KEY_A,   // 跳跃
-            4 to KEY_B,   // 元素战技
-            5 to KEY_Y,   // 元素爆发
-            6 to KEY_L2,  // 冲刺
-            7 to KEY_R2,  // 瞄准
-            8 to KEY_L1,  // 切角色
-            9 to KEY_R1   // 切角色
+            2 to KEY_A,
+            3 to KEY_X,
+            4 to KEY_Y,
+            5 to KEY_B,
+            6 to KEY_RB,
+            7 to KEY_DPAD_UP,
+            8 to KEY_DPAD_RIGHT,
+            9 to KEY_DPAD_LEFT
         )
 
         @Volatile

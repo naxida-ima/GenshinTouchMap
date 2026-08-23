@@ -203,12 +203,13 @@ class KeyButtonView(
         paint.color = if (key.type == KeyType.JOYSTICK) 0x99FF9800.toInt() else Color.WHITE
         canvas.drawRoundRect(cx - rw, cy - rh, cx + rw, cy + rh, 8f * density, 8f * density, paint)
 
-        // 图标/标签
+        // 图标（按 keyId 自绘 SVG 风格符号）+ 标签
+        drawIcon(canvas, cx, cy, minOf(rw, rh))
         paint.style = Paint.Style.FILL
         paint.color = Color.WHITE
-        paint.textSize = 13f * density
+        paint.textSize = 11f * density
         paint.textAlign = Paint.Align.CENTER
-        canvas.drawText(key.label, cx, cy + paint.textSize / 3f, paint)
+        canvas.drawText(if (editing) "${key.label}•🎯" else key.label, cx, cy + rh + 12f * density, paint)
         paint.textAlign = Paint.Align.LEFT
 
         // 编辑模式：右下角缩放把手（可视区右下角）
@@ -229,5 +230,58 @@ class KeyButtonView(
             paint.textSize = 11f * density
             canvas.drawText("未映射", cx, cy + rh + 14f * density, paint)
         }
+    }
+
+    /** 按 keyId 绘制 SVG 风格图标（跳跃/交互/技能/换弹/冲刺/武器/榴晶） */
+    private fun drawIcon(canvas: Canvas, cx: Float, cy: Float, r: Float) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3f * density
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.color = Color.WHITE
+        when (key.keyId) {
+            2 -> { // 跳跃：上箭头
+                canvas.drawLine(cx, cy + r * 0.35f, cx, cy - r * 0.35f, paint)
+                canvas.drawLine(cx - r * 0.25f, cy - r * 0.1f, cx, cy - r * 0.35f, paint)
+                canvas.drawLine(cx + r * 0.25f, cy - r * 0.1f, cx, cy - r * 0.35f, paint)
+            }
+            3 -> { // 交互：手（圆 + 五指线）
+                canvas.drawCircle(cx, cy + r * 0.1f, r * 0.25f, paint)
+                canvas.drawLine(cx, cy - r * 0.1f, cx, cy - r * 0.45f, paint)
+                canvas.drawLine(cx - r * 0.12f, cy - r * 0.12f, cx - r * 0.25f, cy - r * 0.35f, paint)
+                canvas.drawLine(cx + r * 0.12f, cy - r * 0.12f, cx + r * 0.25f, cy - r * 0.35f, paint)
+            }
+            4 -> { // 技能：闪电
+                val path = android.graphics.Path()
+                path.moveTo(cx + r * 0.2f, cy - r * 0.4f)
+                path.lineTo(cx - r * 0.2f, cy + r * 0.1f)
+                path.lineTo(cx + r * 0.02f, cy + r * 0.1f)
+                path.lineTo(cx - r * 0.2f, cy + r * 0.4f)
+                path.lineTo(cx + r * 0.25f, cy - r * 0.15f)
+                path.lineTo(cx + r * 0.02f, cy - r * 0.15f)
+                path.close()
+                paint.style = Paint.Style.FILL
+                canvas.drawPath(path, paint)
+            }
+            5 -> { // 换弹：循环弧 + 箭头
+                val rect = android.graphics.RectF(cx - r * 0.3f, cy - r * 0.3f, cx + r * 0.3f, cy + r * 0.3f)
+                canvas.drawArc(rect, 30f, 300f, false, paint)
+                canvas.drawLine(cx + r * 0.28f, cy - r * 0.1f, cx + r * 0.28f, cy - r * 0.3f, paint)
+                canvas.drawLine(cx + r * 0.1f, cy - r * 0.28f, cx + r * 0.28f, cy - r * 0.3f, paint)
+            }
+            6 -> { // 冲刺：双箭头
+                canvas.drawLine(cx - r * 0.35f, cy - r * 0.3f, cx + r * 0.2f, cy, paint)
+                canvas.drawLine(cx - r * 0.35f, cy + r * 0.3f, cx + r * 0.2f, cy, paint)
+                canvas.drawLine(cx + r * 0.05f, cy - r * 0.3f, cx + r * 0.42f, cy, paint)
+                canvas.drawLine(cx + r * 0.05f, cy + r * 0.3f, cx + r * 0.42f, cy, paint)
+            }
+            7, 8, 9 -> { // 主武器/副武器/榴晶
+                paint.style = Paint.Style.FILL
+                paint.textSize = r * 1.1f
+                paint.textAlign = Paint.Align.CENTER
+                val t = if (key.keyId == 7) "1" else if (key.keyId == 8) "2" else "◆"
+                canvas.drawText(t, cx, cy + r * 0.4f, paint)
+            }
+        }
+        paint.strokeCap = Paint.Cap.BUTT
     }
 }

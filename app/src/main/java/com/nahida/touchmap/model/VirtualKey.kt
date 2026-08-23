@@ -53,3 +53,21 @@ data class VirtualKey(
     /** 透明度 0~1 */
     var opacity: Float = 0.5f
 )
+
+/**
+ * 手柄映射预置布局：原神 7.0 至冬射击模式官方手柄键位。
+ * keyId：0=左摇杆(移动) 1=右摇杆(视角·全屏滑动层，非控件)
+ * 2=跳跃(A) 3=交互(X) 4=枪械技能(Y) 5=换弹(B) 6=冲刺/滑铲(RB)
+ * 7=主武器(十字键上) 8=副武器(十字键右) 9=榴晶(十字键左)
+ */
+val GAMEPAD_PRESET = listOf(
+    VirtualKey(type = KeyType.JOYSTICK, label = "移动", keyId = 0, x = 0.20f, y = 0.78f, width = 120f, height = 120f),
+    VirtualKey(type = KeyType.TAP, label = "跳跃", keyId = 2, x = 0.80f, y = 0.68f, width = 60f, height = 60f),
+    VirtualKey(type = KeyType.TAP, label = "交互", keyId = 3, x = 0.90f, y = 0.78f, width = 60f, height = 60f),
+    VirtualKey(type = KeyType.TAP, label = "技能", keyId = 4, x = 0.72f, y = 0.60f, width = 56f, height = 56f),
+    VirtualKey(type = KeyType.TAP, label = "换弹", keyId = 5, x = 0.90f, y = 0.62f, width = 60f, height = 60f),
+    VirtualKey(type = KeyType.TAP, label = "冲刺", keyId = 6, x = 0.83f, y = 0.84f, width = 68f, height = 56f, shape = KeyShape.RECTANGLE),
+    VirtualKey(type = KeyType.TAP, label = "主武器", keyId = 7, x = 0.08f, y = 0.28f, width = 52f, height = 52f),
+    VirtualKey(type = KeyType.TAP, label = "副武器", keyId = 8, x = 0.17f, y = 0.28f, width = 52f, height = 52f),
+    VirtualKey(type = KeyType.TAP, label = "榴晶", keyId = 9, x = 0.26f, y = 0.28f, width = 52f, height = 52f)
+)

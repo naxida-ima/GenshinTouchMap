@@ -241,9 +241,13 @@ private fun MainScreen() {
                                 useGamepad = e
                                 EngineManager.useGamepad = e
                                 OverlayService.setGamepadMode(e)
+                                if (e) {
+                                    // 应用原神 7.0 手柄预置布局（移动/跳跃/换弹/切枪…）
+                                    OverlayService.applyGamepadPreset(context)
+                                }
                                 Toast.makeText(
                                     context,
-                                    if (e) "手柄映射已开启：请将原神切换为手柄模式" else "手柄映射已关闭",
+                                    if (e) "手柄映射已开启：已应用原神预置布局，请将原神切换为手柄模式" else "手柄映射已关闭",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             }
