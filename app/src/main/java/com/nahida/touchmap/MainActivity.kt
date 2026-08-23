@@ -134,7 +134,7 @@ private fun MainScreen() {
         if (granted) {
             EngineManager.enableShizuku()
             shizukuReady = EngineManager.isShizukuReady()
-            Toast.makeText(context, "Shizuku 引擎已启用（多指更流畅）", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Shizuku 引擎已启用（注意：部分系统上注入会触发触摸仲裁导致长按失效）", Toast.LENGTH_SHORT).show()
         } else {
             runCatching { Shizuku.requestPermission(1001) }
                 .onFailure {

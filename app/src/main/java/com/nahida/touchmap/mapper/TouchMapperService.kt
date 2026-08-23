@@ -31,11 +31,11 @@ class TouchMapperService : AccessibilityService(), TouchInjector {
         @Volatile
         var instance: TouchMapperService? = null
 
-        /** 原地按住 stroke 的时长（尽量长，减少打断） */
-        private const val HOLD_MS = 6000L
+        /** 原地按住 stroke 的时长（尽量长，减少心跳重建对手指按住的打断） */
+        private const val HOLD_MS = 10000L
 
         /** 心跳间隔：HOLD_MS 一半以内即可 */
-        private const val HEARTBEAT_MS = 2000L
+        private const val HEARTBEAT_MS = 4000L
 
         /** 移动 stroke 的时长（跟手） */
         private const val MOVE_MS = 24L
