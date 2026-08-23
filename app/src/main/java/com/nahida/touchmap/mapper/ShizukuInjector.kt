@@ -166,7 +166,7 @@ class ShizukuInjector : TouchInjector {
         val event = MotionEvent.obtain(
             sessionDownTime, eventTime, action, count,
             props, coords, 0, 0,
-            1f, 1f, 0, 0,
+            1f, 1f, -1, 0,
             SOURCE_TOUCHSCREEN, 0
         )
         Log.d(

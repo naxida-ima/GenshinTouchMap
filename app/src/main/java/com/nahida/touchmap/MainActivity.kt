@@ -102,8 +102,8 @@ private fun MainScreen() {
     var editMode by remember { mutableStateOf(false) }
     var running by remember { mutableStateOf(OverlayService.isRunning()) }
     var showAddDialog by remember { mutableStateOf(false) }
-    var shizukuEnabled by remember { mutableStateOf(EngineManager.isShizukuEnabled()) }
-    var engineName by remember { mutableStateOf(EngineManager.engineName()) }
+    var shizukuReady by remember { mutableStateOf(EngineManager.isShizukuReady()) }
+    var useShizuku by remember { mutableStateOf(EngineManager.useShizuku) }
 
     // 收集配置流
     LaunchedEffect(Unit) {
@@ -116,11 +116,10 @@ private fun MainScreen() {
         val listener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
                 EngineManager.enableShizuku()
-                shizukuEnabled = EngineManager.isShizukuEnabled()
-                engineName = EngineManager.engineName()
+                shizukuReady = EngineManager.isShizukuReady()
                 Toast.makeText(context, "Shizuku 引擎已启用", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, "Shizuku 授权被拒绝，将继续使用无障碍引擎", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Shizuku 授权被拒绝", Toast.LENGTH_SHORT).show()
             }
         }
         Shizuku.addRequestPermissionResultListener(listener)
@@ -134,8 +133,7 @@ private fun MainScreen() {
         }.getOrDefault(false)
         if (granted) {
             EngineManager.enableShizuku()
-            shizukuEnabled = EngineManager.isShizukuEnabled()
-            engineName = EngineManager.engineName()
+            shizukuReady = EngineManager.isShizukuReady()
             Toast.makeText(context, "Shizuku 引擎已启用（多指更流畅）", Toast.LENGTH_SHORT).show()
         } else {
             runCatching { Shizuku.requestPermission(1001) }
@@ -177,24 +175,41 @@ private fun MainScreen() {
             PermissionRow(context)
             Spacer(Modifier.height(8.dp))
 
-            // 注入引擎
+            // 注入引擎（两个引擎彻底分开，显式选择）
             Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(12.dp)
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("注入引擎：${EngineManager.engineName()}", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            if (shizukuEnabled) "Shizuku 注入（多指流畅、低延迟，推荐）"
-                            else "无障碍模拟（开箱即用，多指有轻微打断）",
-                            style = MaterialTheme.typography.bodySmall
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("注入引擎：${EngineManager.engineName()}", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                EngineManager.engineDescription(),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = useShizuku,
+                            onCheckedChange = { e ->
+                                useShizuku = e
+                                EngineManager.useShizuku = e
+                                Toast.makeText(
+                                    context,
+                                    if (e) "已切换：Shizuku 引擎" else "已切换：无障碍引擎",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         )
                     }
-                    if (!shizukuEnabled) {
-                        TextButton(onClick = { requestShizuku() }) { Text("启用 Shizuku") }
+                    if (useShizuku && !shizukuReady) {
+                        TextButton(onClick = { requestShizuku() }) { Text("授权 Shizuku") }
+                    }
+                    if (!useShizuku && !EngineManager.isAccessibilityReady()) {
+                        TextButton(onClick = {
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        }) { Text("开启无障碍服务") }
                     }
                 }
             }

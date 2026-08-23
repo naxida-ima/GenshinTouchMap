@@ -261,7 +261,8 @@ class OverlayService : Service() {
      * @param type press / move / release / tap
      */
     private fun onKeyEvent(key: VirtualKey, fingerId: Int, type: String, x: Float, y: Float) {
-        android.util.Log.d("TouchMap", "onKeyEvent ${key.label} $type ($x,$y) t=${SystemClock.uptimeMillis()}")
+        android.util.Log.d("TouchMap", "onKeyEvent ${key.label} $type ($x,$y) t=${SystemClock.uptimeMillis()} " +
+                "engine=${EngineManager.engineName()} ready=${EngineManager.current() != null}")
         val injector = EngineManager.current()
         if (injector == null) {
             Toast.makeText(this, "无可用注入引擎（无障碍未开启，Shizuku 未授权）", Toast.LENGTH_SHORT).show()
