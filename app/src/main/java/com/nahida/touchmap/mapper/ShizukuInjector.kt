@@ -154,12 +154,28 @@ class ShizukuInjector : TouchInjector {
             SOURCE_TOUCHSCREEN, 0
         )
 
-        runCatching {
-            inject.invoke(manager, event, MODE_WAIT_FOR_FINISH)
+        Log.d(
+            TAG,
+            "inject action=${actionName(action)} downTime=$sessionDownTime eventTime=$eventTime " +
+                    "hold=${eventTime - sessionDownTime}ms pointers=$count " +
+                    "pos=(${coords[0]?.x?.toInt()},${coords[0]?.y?.toInt()})"
+        )
+        val ok = runCatching {
+            inject.invoke(manager, event, MODE_WAIT_FOR_FINISH) as Boolean
         }.onFailure {
             Log.e(TAG, "injectInputEvent failed", it)
-        }.also {
-            event.recycle()
-        }
+        }.getOrDefault(false)
+        Log.d(TAG, "inject result=$ok")
+        event.recycle()
+    }
+
+    private fun actionName(action: Int): String = when (action and MotionEvent.ACTION_MASK) {
+        MotionEvent.ACTION_DOWN -> "DOWN"
+        MotionEvent.ACTION_UP -> "UP"
+        MotionEvent.ACTION_MOVE -> "MOVE"
+        MotionEvent.ACTION_POINTER_DOWN -> "POINTER_DOWN(idx=${action shr MotionEvent.ACTION_POINTER_INDEX_SHIFT})"
+        MotionEvent.ACTION_POINTER_UP -> "POINTER_UP(idx=${action shr MotionEvent.ACTION_POINTER_INDEX_SHIFT})"
+        MotionEvent.ACTION_CANCEL -> "CANCEL"
+        else -> "UNKNOWN($action)"
     }
 }
