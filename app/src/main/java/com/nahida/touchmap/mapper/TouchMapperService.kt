@@ -99,13 +99,32 @@ class TouchMapperService : AccessibilityService(), TouchInjector {
 
     override fun release(fingerId: Int) {
         synchronized(lock) {
-            if (fingers.remove(fingerId) == null) return
-            syncLocked()
+            val removed = fingers.remove(fingerId) ?: return
             if (fingers.isEmpty()) {
+                // 关键：最后一个手指抬起时，必须 dispatch 一个新手势取消旧的按住 stroke，
+                // 否则旧 stroke 会一直撑到 HOLD_MS 结束，游戏会把轻点识别成「长按」
+                cancelAllLocked(removed.x, removed.y)
                 heartbeat?.cancel()
                 heartbeat = null
+            } else {
+                syncLocked()
             }
         }
+    }
+
+    /**
+     * 取消所有按住：dispatch 一个 1ms 的瞬时原地 stroke。
+     * dispatchGesture 会取消上一个手势（= 手指抬起），1ms 后新 stroke 自然结束。
+     */
+    private fun cancelAllLocked(x: Float, y: Float) {
+        val path = Path().apply {
+            moveTo(x, y)
+            lineTo(x, y)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(StrokeDescription(path, 0, 1))
+            .build()
+        dispatchGesture(gesture, null, null)
     }
 
     private fun ensureHeartbeat() {

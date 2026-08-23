@@ -109,9 +109,10 @@ class ShizukuInjector : TouchInjector {
     override fun release(fingerId: Int) {
         val p = pointers[fingerId] ?: return
         if (pointers.size == 1) {
-            // 最后一个指针抬起
-            pointers.remove(fingerId)
+            // 关键：先注入 ACTION_UP（事件必须包含该指针），再移除——
+            // 若先移除，pointers 为空会跳过注入，游戏永远收不到「抬起」= 轻点变长按
             injectEvent(MotionEvent.ACTION_UP)
+            pointers.remove(fingerId)
             nextPointerId = 0
         } else {
             val index = pointers.keys.indexOf(fingerId)
