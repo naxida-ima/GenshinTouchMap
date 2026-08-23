@@ -1,7 +1,5 @@
 package com.nahida.touchmap.mapper
 
-import android.os.Handler
-import android.os.HandlerThread
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
@@ -11,28 +9,24 @@ import android.view.MotionEvent
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
 import java.lang.reflect.Method
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 引擎 B：Shizuku + IInputManager.injectInputEvent 注入真实触摸事件。
  *
- * 原理（官方文档 + 开源实践）：
- * 1. SystemServiceHelper.getSystemService("input") 拿到 input 服务的原始 Binder
- * 2. ShizukuBinderWrapper 包装，让调用以 Shizuku 进程（ADB/ROOT）身份执行
- * 3. 反射 IInputManager$Stub.asInterface 得到输入管理器代理
- * 4. 反射 injectInputEvent(InputEvent, mode) 注入 MotionEvent
- *
- * 关键设计：
- * - 注入在独立后台线程串行执行：WAIT_FOR_FINISH 会阻塞调用线程直到系统处理完事件，
- *   若在 UI 主线程调用会阻塞触摸响应，ColorOS 等系统会立刻 CANCEL 触摸（长按失效/摇杆卡死）
- * - MOVE 事件合并：队列中只保留最新一个，避免高频拖动时事件堆积
+ * 设计要点（重写版，解决历史竞态/卡顿问题）：
+ * 1. 主线程只维护指针状态快照，注入统一在单线程后台执行器串行进行。
+ *    WAIT_FOR_FINISH 会阻塞调用线程直到系统处理完事件——放在后台线程，
+ *    主线程永不阻塞，避免 ColorOS 等系统因主线程无响应而 CANCEL 触摸（长按失效/摇杆卡死）。
+ * 2. 每一次注入都携带「事件构造时刻的指针快照」，后台执行器不依赖任何可变状态，
+ *    彻底消除 release 时「主线程先删指针、后台读不到 → UP 丢失 → 自动长按」的竞态。
+ * 3. MOVE 合并：高频拖动只保留最新一帧，避免后台队列堆积。
  */
 class ShizukuInjector : TouchInjector {
 
     companion object {
         private const val TAG = "ShizukuInjector"
-        /**
-         * injectInputEvent 注入模式：WAIT_FOR_FINISH（等待事件处理完成，事件必定送达）
-         */
         private const val MODE_WAIT_FOR_FINISH = 1
         private const val SOURCE_TOUCHSCREEN = InputDevice.SOURCE_TOUCHSCREEN
 
@@ -41,35 +35,31 @@ class ShizukuInjector : TouchInjector {
             private set
     }
 
-    /** fingerId -> 指针状态（注入端维护，所有访问在 lock 内） */
-    private class Pointer(
-        val pointerId: Int,
-        val downTime: Long,
-        @Volatile var x: Float,
-        @Volatile var y: Float
-    )
+    /** 注入端指针（data class 便于快照 copy） */
+    private data class Ptr(val id: Int, var x: Float, var y: Float)
 
-    private val lock = Any()
-    private var injectMethod: Method? = null
-    private var inputManager: Any? = null
-    private val pointers = LinkedHashMap<Int, Pointer>()
+    /** 主线程维护的指针状态（所有访问在 synchronized 内） */
+    private val pointers = LinkedHashMap<Int, Ptr>()
     private var nextPointerId = 0
     private var sessionDownTime = 0L
-    private var pendingMove: Runnable? = null
 
-    /** 注入线程：WAIT_FOR_FINISH 的阻塞发生在后台，主线程永不阻塞 */
-    private val injectThread = HandlerThread("ShizukuInjector").apply { start() }
-    private val injectHandler = Handler(injectThread.looper)
+    /** 单线程后台执行器：串行注入，互不交错 */
+    private val executor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "ShizukuInjector").also { it.isDaemon = true }
+    }
+
+    /** MOVE 合并门：保证队列中最多一个待执行的 MOVE 任务 */
+    private val moveGate = AtomicBoolean(false)
+    @Volatile
+    private var latestMoveSnapshot: List<Ptr>? = null
 
     init {
         connect()
     }
 
-    /** 建立与系统输入服务的连接（在 Shizuku 权限下） */
     private fun connect(): Boolean {
         return runCatching {
-            val binder: IBinder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("input"))
-            // Android 10+ 的 IInputManager 在 android.hardware.input 包；旧版本在 android.view
+            val binder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("input"))
             val stubCls = runCatching {
                 Class.forName("android.hardware.input.IInputManager\$Stub")
             }.getOrElse { Class.forName("android.view.IInputManager\$Stub") }
@@ -77,9 +67,7 @@ class ShizukuInjector : TouchInjector {
                 Class.forName("android.hardware.input.IInputManager")
             }.getOrElse { Class.forName("android.view.IInputManager") }
 
-            inputManager = stubCls
-                .getMethod("asInterface", IBinder::class.java)
-                .invoke(null, binder)
+            inputManager = stubCls.getMethod("asInterface", IBinder::class.java).invoke(null, binder)
             injectMethod = ifaceCls.getMethod(
                 "injectInputEvent",
                 InputEvent::class.java,
@@ -94,96 +82,86 @@ class ShizukuInjector : TouchInjector {
         }.getOrDefault(false)
     }
 
+    private var injectMethod: Method? = null
+    private var inputManager: Any? = null
+
     override fun isReady(): Boolean = available && injectMethod != null && inputManager != null
 
-    override fun press(fingerId: Int, x: Float, y: Float) {
-        synchronized(lock) {
-            if (pointers.isEmpty()) {
-                sessionDownTime = SystemClock.uptimeMillis()
-            }
-            pointers[fingerId] = Pointer(nextPointerId++, sessionDownTime, x, y)
+    /** 取 fingerId 在 pointers 中的顺序索引（POINTER_DOWN/UP 需要） */
+    private fun pointerIndex(fingerId: Int): Int = pointers.keys.indexOf(fingerId)
 
-            if (pointers.size == 1) {
-                scheduleInject(MotionEvent.ACTION_DOWN)
-            } else {
-                val index = pointers.keys.indexOf(fingerId)
-                scheduleInject(MotionEvent.ACTION_POINTER_DOWN or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT))
-            }
+    override fun press(fingerId: Int, x: Float, y: Float) {
+        val action: Int
+        val snapshot: List<Ptr>
+        synchronized(pointers) {
+            if (pointers.isEmpty()) sessionDownTime = SystemClock.uptimeMillis()
+            val pid = nextPointerId++
+            pointers[fingerId] = Ptr(pid, x, y)
+            snapshot = pointers.values.map { it.copy() }
+            action = if (snapshot.size == 1) MotionEvent.ACTION_DOWN
+            else MotionEvent.ACTION_POINTER_DOWN or
+                    (pointerIndex(fingerId) shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
         }
+        executor.submit { doInject(action, snapshot) }
     }
 
     override fun move(fingerId: Int, x: Float, y: Float) {
-        synchronized(lock) {
+        synchronized(pointers) {
             val p = pointers[fingerId] ?: return
             p.x = x
             p.y = y
-            scheduleInject(MotionEvent.ACTION_MOVE)
+            latestMoveSnapshot = pointers.values.map { it.copy() }
+        }
+        // 只有队列空时才提交新任务；否则只更新 latestMoveSnapshot，由在途任务读取最新值
+        if (moveGate.compareAndSet(false, true)) {
+            executor.submit {
+                try {
+                    val snap = latestMoveSnapshot ?: return@submit
+                    doInject(MotionEvent.ACTION_MOVE, snap)
+                } finally {
+                    moveGate.set(false)
+                }
+            }
         }
     }
 
     override fun release(fingerId: Int) {
-        synchronized(lock) {
-            if (pointers[fingerId] == null) return
-            if (pointers.size == 1) {
-                // 关键：先注入 ACTION_UP（事件必须包含该指针），再移除——
-                // 若先移除，pointers 为空会跳过注入，游戏永远收不到「抬起」
-                scheduleInject(MotionEvent.ACTION_UP)
-                pointers.remove(fingerId)
-                nextPointerId = 0
-            } else {
-                val index = pointers.keys.indexOf(fingerId)
-                scheduleInject(MotionEvent.ACTION_POINTER_UP or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT))
-                pointers.remove(fingerId)
-            }
+        val action: Int
+        val snapshot: List<Ptr>
+        synchronized(pointers) {
+            val p = pointers[fingerId] ?: return
+            val idx = pointerIndex(fingerId)
+            // 先构造快照（含待释放指针，UP 必须包含它），再移除
+            snapshot = pointers.values.map { it.copy() }
+            pointers.remove(fingerId)
+            if (pointers.isEmpty()) nextPointerId = 0
+            action = if (snapshot.size == 1) MotionEvent.ACTION_UP
+            else MotionEvent.ACTION_POINTER_UP or
+                    (idx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
         }
+        // 用快照注入，后台执行不依赖 pointers 后续状态 → 无竞态
+        executor.submit { doInject(action, snapshot) }
     }
 
-    /**
-     * 调度一次注入：post 到后台线程串行执行（事件在注入线程读取最新指针状态构造）。
-     * MOVE 合并：队列中只保留最新一个。
-     */
-    private fun scheduleInject(action: Int) {
+    /** 用快照构造事件并注入（在后台线程执行） */
+    private fun doInject(action: Int, snapshot: List<Ptr>) {
         val inject = injectMethod ?: return
         val manager = inputManager ?: return
+        if (snapshot.isEmpty()) return
 
-        val runnable = Runnable {
-            synchronized(lock) {
-                if (pointers.isEmpty()) return@Runnable
-                injectNow(inject, manager, action)
-            }
-        }
-
-        if ((action and MotionEvent.ACTION_MASK) == MotionEvent.ACTION_MOVE) {
-            pendingMove?.let { injectHandler.removeCallbacks(it) }
-            pendingMove = runnable
-            injectHandler.post(runnable)
-        } else {
-            // 非 MOVE 事件优先：丢弃队列中未执行的旧 MOVE
-            pendingMove?.let { injectHandler.removeCallbacks(it) }
-            pendingMove = null
-            injectHandler.post(runnable)
-        }
-    }
-
-    /** 在注入线程构造事件并注入（须持有 lock） */
-    private fun injectNow(inject: Method, manager: Any, action: Int) {
-        if (pointers.isEmpty()) return
-
-        val count = pointers.size
-        val props = arrayOfNulls<MotionEvent.PointerProperties>(count)
-        val coords = arrayOfNulls<MotionEvent.PointerCoords>(count)
-
-        pointers.values.forEachIndexed { i, p ->
-            props[i] = MotionEvent.PointerProperties().apply {
-                id = p.pointerId
+        val count = snapshot.size
+        val props = Array(count) {
+            MotionEvent.PointerProperties().apply {
+                id = snapshot[it].id
                 toolType = MotionEvent.TOOL_TYPE_FINGER
             }
-            coords[i] = MotionEvent.PointerCoords().apply {
-                x = p.x
-                y = p.y
+        }
+        val coords = Array(count) {
+            MotionEvent.PointerCoords().apply {
+                x = snapshot[it].x
+                y = snapshot[it].y
             }
         }
-
         val eventTime = SystemClock.uptimeMillis()
         val event = MotionEvent.obtain(
             sessionDownTime, eventTime, action, count,
@@ -191,18 +169,15 @@ class ShizukuInjector : TouchInjector {
             1f, 1f, 0, 0,
             SOURCE_TOUCHSCREEN, 0
         )
-
         Log.d(
             TAG,
             "inject action=${actionName(action)} downTime=$sessionDownTime eventTime=$eventTime " +
-                    "hold=${eventTime - sessionDownTime}ms pointers=$count " +
-                    "pos=(${coords[0]?.x?.toInt()},${coords[0]?.y?.toInt()})"
+                    "hold=${eventTime - sessionDownTime}ms ptrs=$count " +
+                    "pos=(${coords[0].x.toInt()},${coords[0].y.toInt()})"
         )
         val ok = runCatching {
             inject.invoke(manager, event, MODE_WAIT_FOR_FINISH) as Boolean
-        }.onFailure {
-            Log.e(TAG, "injectInputEvent failed", it)
-        }.getOrDefault(false)
+        }.onFailure { Log.e(TAG, "injectInputEvent failed", it) }.getOrDefault(false)
         Log.d(TAG, "inject result=$ok")
         event.recycle()
     }
@@ -211,8 +186,8 @@ class ShizukuInjector : TouchInjector {
         MotionEvent.ACTION_DOWN -> "DOWN"
         MotionEvent.ACTION_UP -> "UP"
         MotionEvent.ACTION_MOVE -> "MOVE"
-        MotionEvent.ACTION_POINTER_DOWN -> "POINTER_DOWN(idx=${action shr MotionEvent.ACTION_POINTER_INDEX_SHIFT})"
-        MotionEvent.ACTION_POINTER_UP -> "POINTER_UP(idx=${action shr MotionEvent.ACTION_POINTER_INDEX_SHIFT})"
+        MotionEvent.ACTION_POINTER_DOWN -> "PTR_DOWN(${action shr MotionEvent.ACTION_POINTER_INDEX_SHIFT})"
+        MotionEvent.ACTION_POINTER_UP -> "PTR_UP(${action shr MotionEvent.ACTION_POINTER_INDEX_SHIFT})"
         MotionEvent.ACTION_CANCEL -> "CANCEL"
         else -> "UNKNOWN($action)"
     }

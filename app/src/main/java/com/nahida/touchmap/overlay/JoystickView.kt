@@ -6,18 +6,22 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import com.nahida.touchmap.model.VirtualKey
-import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
 
 /**
  * 虚拟摇杆控件（独立悬浮窗口）。
- * - 运行模式：按住 + 拖动 -> 注入「按下 + 方向位移」，位移比例映射到目标摇杆
- * - 编辑模式：拖动移动位置；右下角把手等比缩放；长按设置摇杆映射中心
+ *
+ * 运行模式：按住 + 拖动 -> 向目标摇杆注入「按下(base 中心) + 方向位移」。
+ *   - 第一次按下先注入 base 中心（press），之后每次拖动注入位移（move）。
+ *   - 偏移按 base 半径归一化后乘以目标摇杆满行程半径。
+ * 编辑模式：拖动移动位置；右下角把手等比缩放；按住 600ms 进入映射选点。
  */
 class JoystickView(
     context: Context,
@@ -34,7 +38,8 @@ class JoystickView(
         private const val MODE_NONE = 0
         private const val MODE_MOVE = 1
         private const val MODE_RESIZE = 2
-        private const val MIN_SIZE = 48f
+        private const val MODE_DRAG = 3
+        private const val LONG_PRESS_MS = 600
     }
 
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -46,8 +51,6 @@ class JoystickView(
     private var gestureMode = MODE_NONE
     private var downX = 0f
     private var downY = 0f
-    private var downRawX = 0f
-    private var downRawY = 0f
     private var startX = 0f
     private var startY = 0f
     private var startW = 0f
@@ -55,36 +58,165 @@ class JoystickView(
     private var knobX = 0f
     private var knobY = 0f
     private var moved = false
-    private var longPressTriggered = false
-    private var layoutPending = false
 
     /** 摇杆可视半径（px）：按按键可视尺寸（排除触摸余量 padding） */
     private val baseRadius: Float
-        get() = minOf(key.width, key.height) / 2f * resources.displayMetrics.density - 8f
+        get() = minOf(key.width, key.height) / 2f * density - 8f
 
-    /** 摇杆映射中心（像素） */
     private fun targetCX(): Float = if (key.targetX >= 0f) key.targetX * screenW else screenW / 2f
     private fun targetCY(): Float = if (key.targetY >= 0f) key.targetY * screenH else screenH / 2f
 
-    /** 目标摇杆满行程半径（像素）= joystickRadius(百分比) x 屏幕高度 */
+    /** 目标摇杆满行程半径（像素）= joystickRadius(百分比) × 屏幕高度 */
     private fun targetRadiusPx(): Float = key.joystickRadius * screenH
 
     private val longPressRunnable = Runnable {
         if (editing && gestureMode == MODE_MOVE) {
-            longPressTriggered = true
             onPickRequest(key)
         }
+    }
+
+    init {
+        alpha = key.opacity
     }
 
     private fun isInHandleArea(e: MotionEvent): Boolean {
         val handleSize = 36f * density
         val cx = width / 2f
         val cy = height / 2f
-        return e.x > cx + baseRadius - handleSize && e.y > cy + baseRadius - handleSize
+        val rw = key.width * density / 2f
+        val rh = key.height * density / 2f
+        return e.x > cx + rw - handleSize && e.y > cy + rh - handleSize
     }
 
-    init {
-        alpha = key.opacity
+    private fun triggerDown() {
+        if (editing) return
+        if (key.targetX < 0f || key.targetY < 0f) return
+        onKeyEvent(key, fingerId, "press", targetCX(), targetCY())
+    }
+
+    private fun triggerMove(ratioX: Float, ratioY: Float) {
+        if (editing) return
+        onKeyEvent(
+            key, fingerId, "move",
+            targetCX() + ratioX * targetRadiusPx(),
+            targetCY() + ratioY * targetRadiusPx()
+        )
+    }
+
+    private fun triggerUp() {
+        if (editing) return
+        onKeyEvent(key, fingerId, "release", 0f, 0f)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        Log.d("TouchMap", "JSV ${key.label} ${MotionEvent.actionToString(event.actionMasked)} " +
+                "t=${SystemClock.uptimeMillis()} x=${event.x.toInt()} y=${event.y.toInt()}")
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                startX = key.x
+                startY = key.y
+                startW = key.width
+                startH = key.height
+                moved = false
+                if (editing) {
+                    gestureMode = if (isInHandleArea(event)) MODE_RESIZE else MODE_MOVE
+                    if (gestureMode == MODE_MOVE) {
+                        handler.postDelayed(longPressRunnable, LONG_PRESS_MS.toLong())
+                    }
+                } else {
+                    gestureMode = MODE_DRAG
+                    knobX = 0f
+                    knobY = 0f
+                    triggerDown()
+                    invalidate()
+                }
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (editing) {
+                    val dx = event.x - downX
+                    val dy = event.y - downY
+                    if (!moved && hypot(dx, dy) > touchSlop) {
+                        moved = true
+                        handler.removeCallbacks(longPressRunnable)
+                    }
+                    if (moved) {
+                        when (gestureMode) {
+                            MODE_MOVE -> moveWindow(dx, dy)
+                            MODE_RESIZE -> resizeWindow(dx, dy)
+                        }
+                    }
+                } else if (gestureMode == MODE_DRAG) {
+                    updateKnobAndInject(event)
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                handler.removeCallbacks(longPressRunnable)
+                if (editing) {
+                    if (moved) save()
+                } else if (gestureMode == MODE_DRAG) {
+                    gestureMode = MODE_NONE
+                    knobX = 0f
+                    knobY = 0f
+                    triggerUp()
+                    invalidate()
+                }
+                gestureMode = MODE_NONE
+                return true
+            }
+        }
+        return true
+    }
+
+    private fun updateKnobAndInject(event: MotionEvent) {
+        val cx = width / 2f
+        val cy = height / 2f
+        var dx = event.x - cx
+        var dy = event.y - cy
+        val maxR = baseRadius.coerceAtLeast(1f)
+        val dist = hypot(dx, dy)
+        if (dist > maxR) {
+            dx *= maxR / dist
+            dy *= maxR / dist
+        }
+        knobX = dx
+        knobY = dy
+        val ratioX = dx / maxR
+        val ratioY = dy / maxR
+        triggerMove(ratioX, ratioY)
+        invalidate()
+    }
+
+    private fun moveWindow(dx: Float, dy: Float) {
+        key.x = (startX + dx / screenW).coerceIn(0f, 1f)
+        key.y = (startY + dy / screenH).coerceIn(0f, 1f)
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        val lp = layoutParams as android.view.WindowManager.LayoutParams
+        lp.x = (key.x * screenW - width / 2f).roundToInt()
+        lp.y = (key.y * screenH - height / 2f).roundToInt()
+        wm.updateViewLayout(this, lp)
+    }
+
+    private fun resizeWindow(dx: Float, dy: Float) {
+        val newW = max(36f, startW + dx / density)
+        val newH = max(36f, startH + dy / density)
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        val lp = layoutParams as android.view.WindowManager.LayoutParams
+        val padPx = (28 * density).toInt()
+        lp.width = (newW * density + padPx * 2).toInt()
+        lp.height = (newH * density + padPx * 2).toInt()
+        lp.x = (key.x * screenW - lp.width / 2f).roundToInt()
+        lp.y = (key.y * screenH - lp.height / 2f).roundToInt()
+        wm.updateViewLayout(this, lp)
+        key.width = newW
+        key.height = newH
+    }
+
+    private fun save() {
+        OverlayService.instance?.saveKeys()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -92,7 +224,6 @@ class JoystickView(
         val cx = width / 2f
         val cy = height / 2f
 
-        // 外圈
         basePaint.style = Paint.Style.FILL
         basePaint.color = 0x59000000.toInt()
         canvas.drawCircle(cx, cy, baseRadius, basePaint)
@@ -101,7 +232,6 @@ class JoystickView(
         basePaint.color = Color.WHITE
         canvas.drawCircle(cx, cy, baseRadius, basePaint)
 
-        // 摇杆帽
         val knobR = baseRadius * 0.45f
         knobPaint.style = Paint.Style.FILL
         knobPaint.color = 0x99FFFFFF.toInt()
@@ -111,7 +241,6 @@ class JoystickView(
         knobPaint.color = Color.WHITE
         canvas.drawCircle(cx + knobX, cy + knobY, knobR, knobPaint)
 
-        // 编辑模式：映射中心指示 + 缩放把手（可视区右下角）
         if (editing) {
             basePaint.style = Paint.Style.STROKE
             basePaint.color = 0x88FF5722.toInt()
@@ -123,123 +252,10 @@ class JoystickView(
             canvas.drawCircle(cx + baseRadius, cy + baseRadius, hs, basePaint)
             basePaint.strokeWidth = 2f
             basePaint.color = Color.WHITE
-            canvas.drawLine(cx + baseRadius - hs * 1.1f, cy + baseRadius - hs * 0.5f, cx + baseRadius - hs * 0.5f, cy + baseRadius - hs * 1.1f, basePaint)
+            canvas.drawLine(
+                cx + baseRadius - hs * 1.1f, cy + baseRadius - hs * 0.5f,
+                cx + baseRadius - hs * 0.5f, cy + baseRadius - hs * 1.1f, basePaint
+            )
         }
-    }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        val cx = width / 2f
-        val cy = height / 2f
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                downX = event.x
-                downY = event.y
-                downRawX = event.rawX
-                downRawY = event.rawY
-                startX = key.x
-                startY = key.y
-                startW = key.width
-                startH = key.height
-                moved = false
-                longPressTriggered = false
-                if (editing) {
-                    gestureMode = if (isInHandleArea(event)) MODE_RESIZE else MODE_MOVE
-                    if (gestureMode == MODE_MOVE) {
-                        handler.postDelayed(longPressRunnable, 600)
-                    }
-                } else {
-                    gestureMode = MODE_NONE
-                    knobX = 0f
-                    knobY = 0f
-                    onKeyEvent(key, fingerId, "press", targetCX(), targetCY())
-                }
-                return true
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                if (editing) {
-                    when (gestureMode) {
-                        MODE_RESIZE -> {
-                            val dx = event.rawX - downRawX
-                            val dy = event.rawY - downRawY
-                            val newSize = max(MIN_SIZE, startW + max(dx, dy))
-                            key.width = newSize
-                            key.height = newSize
-                            scheduleLayout()
-                        }
-
-                        MODE_MOVE -> {
-                            val dx = event.rawX - downRawX
-                            val dy = event.rawY - downRawY
-                            if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
-                                moved = true
-                                handler.removeCallbacks(longPressRunnable)
-                            }
-                            if (moved) {
-                                key.x = (startX + dx / screenW).coerceIn(0f, 1f)
-                                key.y = (startY + dy / screenH).coerceIn(0f, 1f)
-                                scheduleLayout()
-                            }
-                        }
-                    }
-                } else {
-                    // 摇杆偏移（限制在可视半径内）
-                    var dx = event.x - cx
-                    var dy = event.y - cy
-                    val dist = hypot(dx, dy)
-                    val maxR = baseRadius
-                    if (dist > maxR) {
-                        dx = dx / dist * maxR
-                        dy = dy / dist * maxR
-                    }
-                    knobX = dx
-                    knobY = dy
-                    invalidate()
-
-                    // 映射到目标摇杆：偏移比例 x 目标半径
-                    val scale = targetRadiusPx() / maxR
-                    val tx = targetCX() + dx * scale
-                    val ty = targetCY() + dy * scale
-                    onKeyEvent(key, fingerId, "move", tx, ty)
-                }
-                return true
-            }
-
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                handler.removeCallbacks(longPressRunnable)
-                if (editing) {
-                    if ((gestureMode == MODE_MOVE && moved) || gestureMode == MODE_RESIZE) {
-                        OverlayService.instance?.saveKeys()
-                    }
-                } else {
-                    knobX = 0f
-                    knobY = 0f
-                    invalidate()
-                    onKeyEvent(key, fingerId, "release", targetCX(), targetCY())
-                }
-                gestureMode = MODE_NONE
-                return true
-            }
-        }
-        return true
-    }
-
-    private fun scheduleLayout() {
-        if (layoutPending) return
-        layoutPending = true
-        postOnAnimation {
-            layoutPending = false
-            val svc = OverlayService.instance ?: return@postOnAnimation
-            if (gestureMode == MODE_RESIZE) {
-                svc.resizeKeyWindow(this, key.width, key.height)
-            } else {
-                svc.moveKeyWindow(this, key.x, key.y)
-            }
-        }
-    }
-
-    fun setEditing(e: Boolean) {
-        editing = e
-        invalidate()
     }
 }
