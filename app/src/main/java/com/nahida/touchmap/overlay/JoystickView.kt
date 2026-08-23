@@ -14,6 +14,7 @@ import android.view.ViewConfiguration
 import com.nahida.touchmap.model.VirtualKey
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * 虚拟摇杆控件（独立悬浮窗口）。

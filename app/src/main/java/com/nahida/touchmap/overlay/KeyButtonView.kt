@@ -183,7 +183,7 @@ class KeyButtonView(
         canvas.drawRoundRect(cx - rw, cy - rh, cx + rw, cy + rh, 8f * density, 8f * density, paint)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2f
-        paint.color = if (key.isJoystick) 0x99FF9800.toInt() else Color.WHITE
+        paint.color = if (key.type == KeyType.JOYSTICK) 0x99FF9800.toInt() else Color.WHITE
         canvas.drawRoundRect(cx - rw, cy - rh, cx + rw, cy + rh, 8f * density, 8f * density, paint)
 
         // 图标/标签
