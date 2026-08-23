@@ -28,6 +28,7 @@ enum class KeyShape {
 /**
  * 一个虚拟按键/摇杆。
  * 所有坐标均为「相对屏幕的百分比」（0f ~ 1f），适配任意分辨率。
+ * 尺寸：width/height（dp）——圆形 width==height（直径），矩形可独立拉宽高（细长条按键）。
  */
 @Serializable
 data class VirtualKey(
@@ -38,8 +39,10 @@ data class VirtualKey(
     /** overlay 上的位置（百分比） */
     var x: Float = 0.5f,
     var y: Float = 0.5f,
-    /** overlay 上的尺寸（dp） */
-    var size: Float = 56f,
+    /** 宽度（dp）：圆形=直径，矩形=宽 */
+    var width: Float = 56f,
+    /** 高度（dp）：圆形=直径（同宽），矩形=高（可独立拉伸） */
+    var height: Float = 56f,
     /** 映射目标坐标（百分比）——选点模式下记录 */
     var targetX: Float = -1f,
     var targetY: Float = -1f,

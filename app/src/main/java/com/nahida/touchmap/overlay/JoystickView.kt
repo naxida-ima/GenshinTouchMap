@@ -12,12 +12,12 @@ import android.view.ViewConfiguration
 import com.nahida.touchmap.model.VirtualKey
 import kotlin.math.abs
 import kotlin.math.hypot
-import kotlin.math.roundToInt
+import kotlin.math.max
 
 /**
  * 虚拟摇杆控件（独立悬浮窗口）。
  * - 运行模式：按住 + 拖动 -> 注入「按下 + 方向位移」，位移比例映射到目标摇杆
- * - 编辑模式：拖动移动位置；长按设置摇杆映射中心
+ * - 编辑模式：拖动移动位置；右下角把手等比缩放；长按设置摇杆映射中心
  */
 class JoystickView(
     context: Context,
@@ -30,21 +30,33 @@ class JoystickView(
     private val onPickRequest: (VirtualKey) -> Unit
 ) : View(context) {
 
+    companion object {
+        private const val MODE_NONE = 0
+        private const val MODE_MOVE = 1
+        private const val MODE_RESIZE = 2
+        private const val MIN_SIZE = 48f
+    }
+
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val handler = Handler(Looper.getMainLooper())
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val density = resources.displayMetrics.density
+
+    private var gestureMode = MODE_NONE
     private var downX = 0f
     private var downY = 0f
     private var downRawX = 0f
     private var downRawY = 0f
     private var startX = 0f
     private var startY = 0f
+    private var startW = 0f
+    private var startH = 0f
     private var knobX = 0f
     private var knobY = 0f
     private var moved = false
     private var longPressTriggered = false
-    private var movePending = false
+    private var layoutPending = false
 
     /** 摇杆可视半径（px） */
     private val baseRadius: Float
@@ -58,10 +70,15 @@ class JoystickView(
     private fun targetRadiusPx(): Float = key.joystickRadius * screenH
 
     private val longPressRunnable = Runnable {
-        if (editing) {
+        if (editing && gestureMode == MODE_MOVE) {
             longPressTriggered = true
             onPickRequest(key)
         }
+    }
+
+    private fun isInHandleArea(e: MotionEvent): Boolean {
+        val handleSize = 36f * density
+        return e.x > width - handleSize && e.y > height - handleSize
     }
 
     init {
@@ -75,7 +92,7 @@ class JoystickView(
 
         // 外圈
         basePaint.style = Paint.Style.FILL
-        basePaint.color = 0x59000000
+        basePaint.color = 0x59000000.toInt()
         canvas.drawCircle(cx, cy, baseRadius, basePaint)
         basePaint.style = Paint.Style.STROKE
         basePaint.strokeWidth = 2f
@@ -92,11 +109,19 @@ class JoystickView(
         knobPaint.color = Color.WHITE
         canvas.drawCircle(cx + knobX, cy + knobY, knobR, knobPaint)
 
-        // 编辑模式：画映射中心指示
+        // 编辑模式：映射中心指示 + 缩放把手
         if (editing) {
             basePaint.style = Paint.Style.STROKE
             basePaint.color = 0x88FF5722.toInt()
             canvas.drawLine(cx, cy, targetCX() - x, targetCY() - y, basePaint)
+
+            val hs = 14f * density
+            basePaint.style = Paint.Style.FILL
+            basePaint.color = 0xCC00E676.toInt()
+            canvas.drawCircle(width - hs, height - hs, hs, basePaint)
+            basePaint.strokeWidth = 2f
+            basePaint.color = Color.WHITE
+            canvas.drawLine(width - hs * 1.6f, height - hs * 0.5f, width - hs * 0.5f, height - hs * 1.6f, basePaint)
         }
     }
 
@@ -111,11 +136,17 @@ class JoystickView(
                 downRawY = event.rawY
                 startX = key.x
                 startY = key.y
+                startW = key.width
+                startH = key.height
                 moved = false
                 longPressTriggered = false
                 if (editing) {
-                    handler.postDelayed(longPressRunnable, 600)
+                    gestureMode = if (isInHandleArea(event)) MODE_RESIZE else MODE_MOVE
+                    if (gestureMode == MODE_MOVE) {
+                        handler.postDelayed(longPressRunnable, 600)
+                    }
                 } else {
+                    gestureMode = MODE_NONE
                     knobX = 0f
                     knobY = 0f
                     onKeyEvent(key, fingerId, "press", targetCX(), targetCY())
@@ -125,20 +156,27 @@ class JoystickView(
 
             MotionEvent.ACTION_MOVE -> {
                 if (editing) {
-                    val dx = event.rawX - downRawX
-                    val dy = event.rawY - downRawY
-                    if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
-                        moved = true
-                        handler.removeCallbacks(longPressRunnable)
-                    }
-                    if (moved) {
-                        key.x = (startX + dx / screenW).coerceIn(0f, 1f)
-                        key.y = (startY + dy / screenH).coerceIn(0f, 1f)
-                        if (!movePending) {
-                            movePending = true
-                            postOnAnimation {
-                                movePending = false
-                                OverlayService.instance?.moveKeyWindow(this, key.x, key.y)
+                    when (gestureMode) {
+                        MODE_RESIZE -> {
+                            val dx = event.rawX - downRawX
+                            val dy = event.rawY - downRawY
+                            val newSize = max(MIN_SIZE, startW + max(dx, dy))
+                            key.width = newSize
+                            key.height = newSize
+                            scheduleLayout()
+                        }
+
+                        MODE_MOVE -> {
+                            val dx = event.rawX - downRawX
+                            val dy = event.rawY - downRawY
+                            if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
+                                moved = true
+                                handler.removeCallbacks(longPressRunnable)
+                            }
+                            if (moved) {
+                                key.x = (startX + dx / screenW).coerceIn(0f, 1f)
+                                key.y = (startY + dy / screenH).coerceIn(0f, 1f)
+                                scheduleLayout()
                             }
                         }
                     }
@@ -168,7 +206,7 @@ class JoystickView(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longPressRunnable)
                 if (editing) {
-                    if (moved) {
+                    if ((gestureMode == MODE_MOVE && moved) || gestureMode == MODE_RESIZE) {
                         OverlayService.instance?.saveKeys()
                     }
                 } else {
@@ -177,10 +215,25 @@ class JoystickView(
                     invalidate()
                     onKeyEvent(key, fingerId, "release", targetCX(), targetCY())
                 }
+                gestureMode = MODE_NONE
                 return true
             }
         }
         return true
+    }
+
+    private fun scheduleLayout() {
+        if (layoutPending) return
+        layoutPending = true
+        postOnAnimation {
+            layoutPending = false
+            val svc = OverlayService.instance ?: return@postOnAnimation
+            if (gestureMode == MODE_RESIZE) {
+                svc.resizeKeyWindow(this, key.width, key.height)
+            } else {
+                svc.moveKeyWindow(this, key.x, key.y)
+            }
+        }
     }
 
     fun setEditing(e: Boolean) {

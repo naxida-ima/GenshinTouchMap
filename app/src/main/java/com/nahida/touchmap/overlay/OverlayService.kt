@@ -169,20 +169,22 @@ class OverlayService : Service() {
 
     /** 目标标记窗口：显示在原神对应按键的位置（不可交互，仅可视化） */
     private fun addTargetWindow(key: VirtualKey) {
-        val sizePx = key.size.dp(this)
+        val wPx = key.width.dp(this)
+        val hPx = key.height.dp(this)
         val marker = TargetMarkerView(this, key)
         val params = WindowManager.LayoutParams(
-            sizePx,
-            sizePx,
+            wPx,
+            hPx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = (key.targetX * screenW - sizePx / 2f).roundToInt()
-        params.y = (key.targetY * screenH - sizePx / 2f).roundToInt()
+        params.x = (key.targetX * screenW - wPx / 2f).roundToInt()
+        params.y = (key.targetY * screenH - hPx / 2f).roundToInt()
         runCatching {
             wm.addView(marker, params)
             targetWindows.add(key to marker)
@@ -190,19 +192,21 @@ class OverlayService : Service() {
     }
 
     private fun addKeyWindow(view: View, key: VirtualKey) {
-        val sizePx = key.size.dp(this)
+        val wPx = key.width.dp(this)
+        val hPx = key.height.dp(this)
         val params = WindowManager.LayoutParams(
-            sizePx,
-            sizePx,
+            wPx,
+            hPx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = (key.x * screenW - sizePx / 2f).roundToInt()
-        params.y = (key.y * screenH - sizePx / 2f).roundToInt()
+        params.x = (key.x * screenW - wPx / 2f).roundToInt()
+        params.y = (key.y * screenH - hPx / 2f).roundToInt()
         runCatching {
             wm.addView(view, params)
             keyWindows.add(key to view)
@@ -221,12 +225,14 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = screenW - sizePx - 16.dp(this)
-        params.y = screenH / 2 - sizePx / 2
+        // 悬浮球默认在右侧中部略下（避开右上角挖孔等异形区域）
+        params.x = screenW - sizePx - 20.dp(this)
+        params.y = (screenH * 0.55f - sizePx / 2f).roundToInt()
         runCatching {
             wm.addView(ball, params)
             floatBallView = ball
@@ -257,13 +263,6 @@ class OverlayService : Service() {
             "press" -> injector.press(fingerId, x, y)
             "move" -> injector.move(fingerId, x, y)
             "release" -> injector.release(fingerId)
-            "tap" -> {
-                injector.press(fingerId, x, y)
-                scope.launch {
-                    kotlinx.coroutines.delay(40)
-                    injector.release(fingerId)
-                }
-            }
         }
     }
 
@@ -327,14 +326,33 @@ class OverlayService : Service() {
 
     // ---------- 工具 ----------
 
-    /** 供 KeyButtonView / JoystickView 更新窗口位置（拖动时） */
+    /** 供 KeyButtonView / JoystickView 更新窗口位置（拖动时，保持尺寸） */
     fun moveKeyWindow(view: View, centerXPercent: Float, centerYPercent: Float) {
         val pair = keyWindows.firstOrNull { it.second === view } ?: return
         val key = pair.first
-        val sizePx = key.size.dp(this)
         val params = view.layoutParams as WindowManager.LayoutParams
-        params.x = (centerXPercent * screenW - sizePx / 2f).roundToInt()
-        params.y = (centerYPercent * screenH - sizePx / 2f).roundToInt()
+        params.x = (centerXPercent * screenW - params.width / 2f).roundToInt()
+        params.y = (centerYPercent * screenH - params.height / 2f).roundToInt()
+        runCatching { wm.updateViewLayout(view, params) }
+    }
+
+    /**
+     * 编辑模式缩放把手：更新按键尺寸与位置（保持中心不变）。
+     * @param widthDp 新宽度（dp）
+     * @param heightDp 新高度（dp）
+     */
+    fun resizeKeyWindow(view: View, widthDp: Float, heightDp: Float) {
+        val pair = keyWindows.firstOrNull { it.second === view } ?: return
+        val key = pair.first
+        val wPx = widthDp.dp(this)
+        val hPx = heightDp.dp(this)
+        val params = view.layoutParams as WindowManager.LayoutParams
+        val cx = key.x * screenW
+        val cy = key.y * screenH
+        params.width = wPx
+        params.height = hPx
+        params.x = (cx - wPx / 2f).roundToInt()
+        params.y = (cy - hPx / 2f).roundToInt()
         runCatching { wm.updateViewLayout(view, params) }
     }
 

@@ -391,8 +391,7 @@ private fun AddKeyDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 listOf(
-                    KeyType.TAP to "点击键（跳跃、切枪等）",
-                    KeyType.HOLD to "长按键（瞄准、冲刺等）",
+                    KeyType.TAP to "按键（轻点=单发，长按=连发，开火键首选）",
                     KeyType.JOYSTICK to "摇杆（移动）"
                 ).forEach { (type, desc) ->
                     Row(verticalAlignment = Alignment.CenterVertically) {

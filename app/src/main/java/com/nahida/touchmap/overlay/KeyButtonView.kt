@@ -14,11 +14,16 @@ import com.nahida.touchmap.model.KeyShape
 import com.nahida.touchmap.model.KeyType
 import com.nahida.touchmap.model.VirtualKey
 import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * 虚拟按键控件（独立悬浮窗口）。
  * - 运行模式：TAP 点击 / HOLD 按住，注入模拟触摸
- * - 编辑模式：拖动移动位置（raw 绝对坐标计算，保证跟手且不抽搐）；长按进入选点模式
+ * - 编辑模式：
+ *   - 拖动主体 → 移动位置（raw 绝对坐标，跟手不抽搐）
+ *   - 拖动右下角把手 → 调整大小（圆形等比缩放，矩形可独立拉宽/拉高）
+ *   - 长按 → 进入选点模式
+ * - 未设置映射目标时，编辑模式显示「未映射」提示
  */
 class KeyButtonView(
     context: Context,
@@ -31,21 +36,31 @@ class KeyButtonView(
     private val onPickRequest: (VirtualKey) -> Unit
 ) : View(context) {
 
+    companion object {
+        private const val MODE_NONE = 0
+        private const val MODE_MOVE = 1
+        private const val MODE_RESIZE = 2
+        private const val MIN_SIZE = 32f
+    }
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val handler = Handler(Looper.getMainLooper())
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val density = resources.displayMetrics.density
 
-    // 编辑模式拖动状态（基于 raw 绝对坐标，不依赖 View.x 避免累加误差）
+    private var gestureMode = MODE_NONE
     private var downRawX = 0f
     private var downRawY = 0f
     private var startX = 0f
     private var startY = 0f
+    private var startW = 0f
+    private var startH = 0f
     private var moved = false
     private var longPressTriggered = false
-    private var movePending = false
+    private var layoutPending = false
 
     private val longPressRunnable = Runnable {
-        if (editing) {
+        if (editing && gestureMode == MODE_MOVE) {
             longPressTriggered = true
             onPickRequest(key)
         }
@@ -55,38 +70,60 @@ class KeyButtonView(
         alpha = key.opacity
     }
 
+    private fun isInHandleArea(e: MotionEvent): Boolean {
+        val handleSize = 36f * density
+        return e.x > width - handleSize && e.y > height - handleSize
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val cx = width / 2f
         val cy = height / 2f
-        val r = minOf(width, height) / 2f - 4f
+        val rw = max(0f, width / 2f - 4f)
+        val rh = max(0f, height / 2f - 4f)
 
         paint.style = Paint.Style.FILL
         paint.color = if (key.type == KeyType.HOLD) 0x66FF9800.toInt() else 0x6600BFFF.toInt()
-
         if (key.shape == KeyShape.RECTANGLE) {
-            val rect = RectF(cx - r, cy - r, cx + r, cy + r)
-            canvas.drawRoundRect(rect, 10f, 10f, paint)
+            canvas.drawRoundRect(RectF(cx - rw, cy - rh, cx + rw, cy + rh), 10f, 10f, paint)
         } else {
-            canvas.drawCircle(cx, cy, r, paint)
+            canvas.drawCircle(cx, cy, minOf(rw, rh), paint)
         }
 
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 3f
         paint.color = Color.WHITE
         if (key.shape == KeyShape.RECTANGLE) {
-            val rect = RectF(cx - r, cy - r, cx + r, cy + r)
-            canvas.drawRoundRect(rect, 10f, 10f, paint)
+            canvas.drawRoundRect(RectF(cx - rw, cy - rh, cx + rw, cy + rh), 10f, 10f, paint)
         } else {
-            canvas.drawCircle(cx, cy, r, paint)
+            canvas.drawCircle(cx, cy, minOf(rw, rh), paint)
         }
 
         // 标签
         paint.style = Paint.Style.FILL
         paint.color = Color.WHITE
-        paint.textSize = 13f * resources.displayMetrics.density
+        paint.textSize = 13f * density
         paint.textAlign = Paint.Align.CENTER
         canvas.drawText(if (editing) "${key.label}•🎯" else key.label, cx, cy + paint.textSize / 3f, paint)
+
+        // 编辑模式：右下角缩放把手
+        if (editing) {
+            val hs = 14f * density
+            paint.style = Paint.Style.FILL
+            paint.color = 0xCC00E676.toInt()
+            canvas.drawCircle(width - hs, height - hs, hs, paint)
+            paint.strokeWidth = 2f
+            paint.color = Color.WHITE
+            canvas.drawLine(width - hs * 1.6f, height - hs * 0.5f, width - hs * 0.5f, height - hs * 1.6f, paint)
+        }
+
+        // 编辑模式：未映射提示
+        if (editing && key.targetX < 0f) {
+            paint.style = Paint.Style.FILL
+            paint.color = Color.parseColor("#FF5252")
+            paint.textSize = 11f * density
+            canvas.drawText("未映射", cx, height + 14f * density, paint)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -96,11 +133,17 @@ class KeyButtonView(
                 downRawY = event.rawY
                 startX = key.x
                 startY = key.y
+                startW = key.width
+                startH = key.height
                 moved = false
                 longPressTriggered = false
                 if (editing) {
-                    handler.postDelayed(longPressRunnable, 600)
+                    gestureMode = if (isInHandleArea(event)) MODE_RESIZE else MODE_MOVE
+                    if (gestureMode == MODE_MOVE) {
+                        handler.postDelayed(longPressRunnable, 600)
+                    }
                 } else {
+                    gestureMode = MODE_NONE
                     triggerDown()
                 }
                 return true
@@ -108,22 +151,32 @@ class KeyButtonView(
 
             MotionEvent.ACTION_MOVE -> {
                 if (editing) {
-                    val dx = event.rawX - downRawX
-                    val dy = event.rawY - downRawY
-                    if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
-                        moved = true
-                        handler.removeCallbacks(longPressRunnable)
-                    }
-                    if (moved) {
-                        // raw 绝对坐标：起始位置 + 手指偏移，绝对跟手
-                        key.x = (startX + dx / screenW).coerceIn(0f, 1f)
-                        key.y = (startY + dy / screenH).coerceIn(0f, 1f)
-                        // 帧节流：每帧最多更新一次窗口位置
-                        if (!movePending) {
-                            movePending = true
-                            postOnAnimation {
-                                movePending = false
-                                OverlayService.instance?.moveKeyWindow(this, key.x, key.y)
+                    when (gestureMode) {
+                        MODE_RESIZE -> {
+                            val dx = event.rawX - downRawX
+                            val dy = event.rawY - downRawY
+                            if (key.shape == KeyShape.RECTANGLE) {
+                                key.width = max(MIN_SIZE, startW + dx)
+                                key.height = max(MIN_SIZE, startH + dy)
+                            } else {
+                                val newSize = max(MIN_SIZE, startW + max(dx, dy))
+                                key.width = newSize
+                                key.height = newSize
+                            }
+                            scheduleLayout()
+                        }
+
+                        MODE_MOVE -> {
+                            val dx = event.rawX - downRawX
+                            val dy = event.rawY - downRawY
+                            if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
+                                moved = true
+                                handler.removeCallbacks(longPressRunnable)
+                            }
+                            if (moved) {
+                                key.x = (startX + dx / screenW).coerceIn(0f, 1f)
+                                key.y = (startY + dy / screenH).coerceIn(0f, 1f)
+                                scheduleLayout()
                             }
                         }
                     }
@@ -131,39 +184,46 @@ class KeyButtonView(
                 return true
             }
 
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longPressRunnable)
                 if (editing) {
-                    if (moved) {
+                    if (gestureMode == MODE_MOVE && moved) {
+                        OverlayService.instance?.saveKeys()
+                    } else if (gestureMode == MODE_RESIZE) {
                         OverlayService.instance?.saveKeys()
                     }
                 } else {
                     triggerUp()
                 }
-                return true
-            }
-
-            MotionEvent.ACTION_CANCEL -> {
-                handler.removeCallbacks(longPressRunnable)
-                if (!editing) triggerUp()
+                gestureMode = MODE_NONE
                 return true
             }
         }
         return true
     }
 
-    private fun triggerDown() {
-        if (key.type == KeyType.HOLD) {
-            onKeyEvent(key, fingerId, "press", targetXPx(), targetYPx())
-        } else {
-            onKeyEvent(key, fingerId, "tap", targetXPx(), targetYPx())
+    /** 帧节流：每帧最多一次窗口布局更新（移动/缩放共用） */
+    private fun scheduleLayout() {
+        if (layoutPending) return
+        layoutPending = true
+        postOnAnimation {
+            layoutPending = false
+            val svc = OverlayService.instance ?: return@postOnAnimation
+            if (gestureMode == MODE_RESIZE) {
+                svc.resizeKeyWindow(this, key.width, key.height)
+            } else {
+                svc.moveKeyWindow(this, key.x, key.y)
+            }
         }
     }
 
+    private fun triggerDown() {
+        // 统一行为：按下即注入 press（按住持续 = 连发，快速抬起 = 单点）
+        onKeyEvent(key, fingerId, "press", targetXPx(), targetYPx())
+    }
+
     private fun triggerUp() {
-        if (key.type == KeyType.HOLD) {
-            onKeyEvent(key, fingerId, "release", targetXPx(), targetYPx())
-        }
+        onKeyEvent(key, fingerId, "release", targetXPx(), targetYPx())
     }
 
     private fun targetXPx(): Float = if (key.targetX >= 0f) key.targetX * screenW else 0f
