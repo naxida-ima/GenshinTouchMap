@@ -10,6 +10,8 @@ import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
 import java.lang.reflect.Method
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -44,9 +46,22 @@ class ShizukuInjector : TouchInjector {
     private var sessionDownTime = 0L
 
     /** 单线程后台执行器：串行注入，互不交错 */
-    private val executor = Executors.newSingleThreadExecutor { r ->
+    private val executor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ShizukuInjector").also { it.isDaemon = true }
     }
+
+    /**
+     * 按下注入延迟：真实触摸 DOWN 与注入 DOWN 几乎同时到达系统时，
+     * ColorOS 触摸仲裁会取消真实触摸（CANCEL）→ 长按失效。
+     * 延迟到真实触摸稳定后再注入，可避开仲裁窗口（用户已接受该延迟）。
+     */
+    private val PRESS_DELAY_MS = 50L
+
+    /** 快速点击时 DOWN 与 UP 的间隔 */
+    private val CLICK_GAP_MS = 15L
+
+    /** 尚未执行的延迟按下任务（fingerId -> ScheduledFuture），访问需持有 lock */
+    private val pendingPressFutures = HashMap<Int, ScheduledFuture<*>>()
 
     /** MOVE 合并门：保证队列中最多一个待执行的 MOVE 任务 */
     private val moveGate = AtomicBoolean(false)
@@ -102,7 +117,12 @@ class ShizukuInjector : TouchInjector {
             else MotionEvent.ACTION_POINTER_DOWN or
                     (pointerIndex(fingerId) shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
         }
-        executor.submit { doInject(action, snapshot) }
+        // 延迟注入（避开触摸仲裁窗口）；期间若收到 release 则取消并转为点击
+        val future = executor.schedule({
+            doInject(action, snapshot)
+            synchronized(pointers) { pendingPressFutures.remove(fingerId) }
+        }, PRESS_DELAY_MS, TimeUnit.MILLISECONDS)
+        synchronized(pointers) { pendingPressFutures[fingerId] = future }
     }
 
     override fun move(fingerId: Int, x: Float, y: Float) {
@@ -128,6 +148,7 @@ class ShizukuInjector : TouchInjector {
     override fun release(fingerId: Int) {
         val action: Int
         val snapshot: List<Ptr>
+        val pressPending: Boolean
         synchronized(pointers) {
             val p = pointers[fingerId] ?: return
             val idx = pointerIndex(fingerId)
@@ -138,9 +159,17 @@ class ShizukuInjector : TouchInjector {
             action = if (snapshot.size == 1) MotionEvent.ACTION_UP
             else MotionEvent.ACTION_POINTER_UP or
                     (idx shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+            // 若延迟按下尚未注入：取消它，转为「点击」（DOWN + 短间隔 UP）
+            val pending = pendingPressFutures.remove(fingerId)
+            pending?.cancel(false)
+            pressPending = pending != null
         }
-        // 用快照注入，后台执行不依赖 pointers 后续状态 → 无竞态
-        executor.submit { doInject(action, snapshot) }
+        if (pressPending) {
+            executor.schedule({ doInject(MotionEvent.ACTION_DOWN, snapshot) }, 0, TimeUnit.MILLISECONDS)
+            executor.schedule({ doInject(MotionEvent.ACTION_UP, snapshot) }, CLICK_GAP_MS, TimeUnit.MILLISECONDS)
+        } else {
+            executor.schedule({ doInject(action, snapshot) }, 0, TimeUnit.MILLISECONDS)
+        }
     }
 
     /** 用快照构造事件并注入（在后台线程执行） */
