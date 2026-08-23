@@ -64,6 +64,7 @@ import com.nahida.touchmap.model.KeyShape
 import com.nahida.touchmap.model.KeyType
 import com.nahida.touchmap.model.VirtualKey
 import com.nahida.touchmap.overlay.OverlayService
+import com.nahida.touchmap.remote.ConfigPickerService
 import com.nahida.touchmap.remote.RemoteKey
 import com.nahida.touchmap.remote.RemoteKeyStore
 import com.nahida.touchmap.remote.RemoteServerHolder
@@ -516,41 +517,62 @@ private fun ReceiverTabContent(context: Context) {
             style = MaterialTheme.typography.bodySmall
         )
         Spacer(Modifier.height(8.dp))
-        Text("按键注入点配置（预置原神模板，可调）", style = MaterialTheme.typography.titleSmall)
+        // 注入点配置：游戏上点选（所见即所得，无需调坐标）
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("注入点配置（预置原神模板）", style = MaterialTheme.typography.titleSmall)
+                Text("打开游戏后点下方按钮，直接在游戏画面上点击各按键位置", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = {
+                        if (Settings.canDrawOverlays(context)) {
+                            ConfigPickerService.start(context)
+                        } else {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}")
+                                )
+                            )
+                            Toast.makeText(context, "需要悬浮窗权限才能显示配置层", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("在游戏上点选配置注入点") }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("当前配置：", style = MaterialTheme.typography.titleSmall)
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             items(remoteKeys, key = { it.keyId }) { rk ->
-                RemoteKeyRow(rk, onSave = { updated ->
-                    scope.launch {
-                        RemoteKeyStore.saveKeys(context, remoteKeys.map { if (it.keyId == updated.keyId) updated else it })
-                    }
-                })
+                RemoteKeyRow(rk)
             }
         }
     }
 }
 
 @Composable
-private fun RemoteKeyRow(key: RemoteKey, onSave: (RemoteKey) -> Unit) {
-    var x by remember(key.keyId) { mutableStateOf(key.targetX) }
-    var y by remember(key.keyId) { mutableStateOf(key.targetY) }
-    var radius by remember(key.keyId) { mutableStateOf(key.joystickRadius) }
-
+private fun RemoteKeyRow(key: RemoteKey) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(
-                "#${key.keyId} ${key.name}${if (key.isJoystick) "（摇杆）" else ""}",
-                style = MaterialTheme.typography.titleSmall
-            )
-            Text("X: ${"%.0f".format(x * 100)}%", style = MaterialTheme.typography.bodySmall)
-            Slider(value = x, onValueChange = { x = it; onSave(key.copy(targetX = x)) })
-            Text("Y: ${"%.0f".format(y * 100)}%", style = MaterialTheme.typography.bodySmall)
-            Slider(value = y, onValueChange = { y = it; onSave(key.copy(targetY = y)) })
-            if (key.isJoystick) {
-                Text("摇杆半径: ${"%.0f".format(radius * 100)}% 屏高", style = MaterialTheme.typography.bodySmall)
-                Slider(value = radius, onValueChange = { radius = it; onSave(key.copy(joystickRadius = radius)) }, valueRange = 0.05f..0.3f)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "#${key.keyId} ${key.name}${if (key.isJoystick) "（摇杆）" else ""}",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    "注入点 (${"%.0f".format(key.targetX * 100)}%, ${"%.0f".format(key.targetY * 100)}%)" +
+                            if (key.isJoystick) "  半径 ${"%.0f".format(key.joystickRadius * 100)}%" else "",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
     }

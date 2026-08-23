@@ -57,5 +57,15 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- 接收端注入点配置服务（游戏画面上点选） -->
+        <service
+            android:name=".remote.ConfigPickerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Remote key injection point config overlay" />
+        </service>
     </application>
 </manifest>
