@@ -122,7 +122,7 @@ class TouchMapperService : AccessibilityService(), TouchInjector {
             lineTo(x, y)
         }
         val gesture = GestureDescription.Builder()
-            .addStroke(StrokeDescription(path, 0, 1))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 1))
             .build()
         dispatchGesture(gesture, null, null)
     }
