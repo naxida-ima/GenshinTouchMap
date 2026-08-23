@@ -135,6 +135,8 @@ class OverlayService : Service() {
 
     /** 手柄模式视角滑动层：全屏透明，滑动注入右摇杆轴（AXIS_RX/RY） */
     private var viewLayer: View? = null
+    private var viewDownX = 0f
+    private var viewDownY = 0f
 
     override fun onCreate() {
         super.onCreate()
