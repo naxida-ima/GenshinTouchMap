@@ -67,6 +67,7 @@ import com.nahida.touchmap.overlay.OverlayService
 import com.nahida.touchmap.remote.RemoteKey
 import com.nahida.touchmap.remote.RemoteKeyStore
 import com.nahida.touchmap.remote.RemoteServerHolder
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 

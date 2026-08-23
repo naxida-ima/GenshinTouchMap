@@ -86,7 +86,7 @@ class TouchClient(
     }
 
     private fun startHeartbeat() {
-        heartbeatThread = Thread {
+        val t = Thread {
             while (connected) {
                 try {
                     Thread.sleep(HEARTBEAT_MS)
@@ -97,7 +97,9 @@ class TouchClient(
                     break
                 }
             }
-        }.apply { isDaemon = true }.start()
+        }.apply { isDaemon = true }
+        heartbeatThread = t
+        t.start()
     }
 
     private fun readLoop(socket: Socket) {
