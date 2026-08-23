@@ -51,11 +51,14 @@ class KeyButtonView(
     private var gestureMode = MODE_NONE
     private var downX = 0f
     private var downY = 0f
+    private var downRawX = 0f
+    private var downRawY = 0f
     private var startX = 0f
     private var startY = 0f
     private var startW = 0f
     private var startH = 0f
     private var moved = false
+    private var layoutPending = false
 
     /** 运行模式按下状态：保证 press 与 release 严格配对，杜绝重复注入 */
     private var downActive = false
@@ -105,6 +108,8 @@ class KeyButtonView(
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
                 downY = event.y
+                downRawX = event.rawX
+                downRawY = event.rawY
                 startX = key.x
                 startY = key.y
                 startW = key.width
@@ -126,8 +131,9 @@ class KeyButtonView(
             }
             MotionEvent.ACTION_MOVE -> {
                 if (editing) {
-                    val dx = event.x - downX
-                    val dy = event.y - downY
+                    // raw 绝对坐标：窗口移动不影响位移计算（相对坐标会双重累积误差 → 抽搐不跟手）
+                    val dx = event.rawX - downRawX
+                    val dy = event.rawY - downRawY
                     if (!moved && kotlin.math.hypot(dx, dy) > touchSlop) {
                         moved = true
                         handler.removeCallbacks(longPressRunnable)
@@ -137,27 +143,14 @@ class KeyButtonView(
                             MODE_MOVE -> {
                                 key.x = (startX + dx / screenW).coerceIn(0f, 1f)
                                 key.y = (startY + dy / screenH).coerceIn(0f, 1f)
-                                val wm = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-                                val lp = layoutParams as android.view.WindowManager.LayoutParams
-                                lp.x = (key.x * screenW - width / 2f).roundToInt()
-                                lp.y = (key.y * screenH - height / 2f).roundToInt()
-                                wm.updateViewLayout(this, lp)
+                                scheduleLayout()
                             }
                             MODE_RESIZE -> {
                                 val newW = max(36f, startW + dx / density)
                                 val newH = max(36f, startH + dy / density)
-                                val wm = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-                                val lp = layoutParams as android.view.WindowManager.LayoutParams
-                                val padPx = (28 * density).toInt()
-                                val wPx = (newW * density + padPx * 2).toInt()
-                                val hPx = (newH * density + padPx * 2).toInt()
-                                lp.width = wPx
-                                lp.height = hPx
-                                lp.x = (key.x * screenW - wPx / 2f).roundToInt()
-                                lp.y = (key.y * screenH - hPx / 2f).roundToInt()
-                                wm.updateViewLayout(this, lp)
                                 key.width = newW
                                 key.height = newH
+                                scheduleLayout()
                             }
                         }
                     }
@@ -185,6 +178,21 @@ class KeyButtonView(
 
     private fun save() {
         OverlayService.instance?.saveKeys()
+    }
+
+    /** 帧节流：每帧最多一次窗口布局更新（移动/缩放共用，防抖动） */
+    private fun scheduleLayout() {
+        if (layoutPending) return
+        layoutPending = true
+        postOnAnimation {
+            layoutPending = false
+            val svc = OverlayService.instance ?: return@postOnAnimation
+            if (gestureMode == MODE_RESIZE) {
+                svc.resizeKeyWindow(this, key.width, key.height)
+            } else {
+                svc.moveKeyWindow(this, key.x, key.y)
+            }
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
