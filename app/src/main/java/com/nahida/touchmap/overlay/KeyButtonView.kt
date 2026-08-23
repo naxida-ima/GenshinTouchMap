@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -132,6 +133,8 @@ class KeyButtonView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        android.util.Log.d("TouchMap", "KBV ${key.label} ${event.actionToString(event.actionMasked)} " +
+                "t=${SystemClock.uptimeMillis()} x=${event.x.toInt()} y=${event.y.toInt()} raw=(${event.rawX.toInt()},${event.rawY.toInt()})")
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downRawX = event.rawX
