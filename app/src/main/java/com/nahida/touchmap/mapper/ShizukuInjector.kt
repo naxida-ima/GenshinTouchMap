@@ -26,8 +26,11 @@ class ShizukuInjector : TouchInjector {
 
     companion object {
         private const val TAG = "ShizukuInjector"
-        /** injectInputEvent 注入模式：异步（不等待事件处理完成） */
-        private const val MODE_ASYNC = 0
+        /**
+         * injectInputEvent 注入模式：WAIT_FOR_FINISH（等待事件处理完成）。
+         * 相比 ASYNC 更可靠：down/up 事件必定送达，长按/连发不会因异步丢事件而失效。
+         */
+        private const val MODE_WAIT_FOR_FINISH = 1
         private const val SOURCE_TOUCHSCREEN = InputDevice.SOURCE_TOUCHSCREEN
 
         @Volatile
@@ -152,7 +155,7 @@ class ShizukuInjector : TouchInjector {
         )
 
         runCatching {
-            inject.invoke(manager, event, MODE_ASYNC)
+            inject.invoke(manager, event, MODE_WAIT_FOR_FINISH)
         }.onFailure {
             Log.e(TAG, "injectInputEvent failed", it)
         }.also {
