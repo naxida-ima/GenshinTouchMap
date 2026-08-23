@@ -87,6 +87,15 @@ class OverlayService : Service() {
                 svc.remoteClient = null
             }
         }
+
+        /** 切换手柄映射模式（假映射） */
+        fun setGamepadMode(on: Boolean) {
+            instance?.let { svc ->
+                svc.gamepadMode = on
+                if (on) com.nahida.touchmap.mapper.EngineManager.enableGamepad()
+                svc.rebuildAll()
+            }
+        }
     }
 
     private lateinit var wm: WindowManager
@@ -111,6 +120,10 @@ class OverlayService : Service() {
 
     @Volatile
     private var remoteClient: com.nahida.touchmap.net.TouchClient? = null
+
+    /** 手柄映射模式（假映射）：触摸转手柄输入注入，控件输出归一化向量 */
+    @Volatile
+    private var gamepadMode = false
 
     override fun onCreate() {
         super.onCreate()
@@ -185,12 +198,13 @@ class OverlayService : Service() {
             showPicker(pickingKey!!)
             return
         }
-        // 按键 / 摇杆窗口
+        // 按键 / 摇杆窗口（手柄映射/双机发射模式：控件输出归一化向量）
+        val vectorMode = remoteMode || gamepadMode
         keys.forEachIndexed { index, key ->
             val v = if (key.type == KeyType.JOYSTICK) {
-                JoystickView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest, remoteMode)
+                JoystickView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest, vectorMode)
             } else {
-                KeyButtonView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest, remoteMode)
+                KeyButtonView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest, vectorMode)
             }
             addKeyWindow(v, key)
             // 编辑模式：在游戏层映射目标位置显示同形状标记（两层可视化）
@@ -294,6 +308,17 @@ class OverlayService : Service() {
     private fun onKeyEvent(key: VirtualKey, fingerId: Int, type: String, x: Float, y: Float) {
         android.util.Log.d("TouchMap", "onKeyEvent ${key.label} keyId=${key.keyId} $type ($x,$y) t=${SystemClock.uptimeMillis()} " +
                 "engine=${EngineManager.engineName()} ready=${EngineManager.current() != null} remote=$remoteMode")
+
+        // 手柄映射模式：触摸 → 手柄事件注入（假映射，无仲裁）
+        if (gamepadMode) {
+            val gamepad = com.nahida.touchmap.mapper.EngineManager.gamepad() ?: return
+            when (type) {
+                "press" -> gamepad.press(fingerId, x, y)
+                "move" -> gamepad.move(fingerId, x, y)
+                "release" -> gamepad.release(fingerId)
+            }
+            return
+        }
 
         // 双机发射模式：转发远端（keyId + 手势 + 向量坐标）
         if (remoteMode) {

@@ -110,6 +110,7 @@ private fun MainScreen() {
     var showAddDialog by remember { mutableStateOf(false) }
     var shizukuReady by remember { mutableStateOf(EngineManager.isShizukuReady()) }
     var useShizuku by remember { mutableStateOf(EngineManager.useShizuku) }
+    var useGamepad by remember { mutableStateOf(EngineManager.useGamepad) }
     // 模式：0=本机 1=发射 2=接收（sender 精简版只有发射）
     var mode by remember { mutableStateOf(if (BuildConfig.IS_FULL) 0 else 1) }
 
@@ -222,6 +223,27 @@ private fun MainScreen() {
                                 Toast.makeText(
                                     context,
                                     if (e) "已切换：Shizuku 引擎" else "已切换：无障碍引擎",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        )
+                    }
+                    // 手柄映射（假映射）开关
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "手柄映射（假映射，无仲裁）",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Switch(
+                            checked = useGamepad,
+                            onCheckedChange = { e ->
+                                useGamepad = e
+                                EngineManager.useGamepad = e
+                                OverlayService.setGamepadMode(e)
+                                Toast.makeText(
+                                    context,
+                                    if (e) "手柄映射已开启：请将原神切换为手柄模式" else "手柄映射已关闭",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             }
