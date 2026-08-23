@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import com.nahida.touchmap.model.VirtualKey
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -32,12 +33,18 @@ class JoystickView(
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val handler = Handler(Looper.getMainLooper())
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
     private var downY = 0f
+    private var downRawX = 0f
+    private var downRawY = 0f
+    private var startX = 0f
+    private var startY = 0f
     private var knobX = 0f
     private var knobY = 0f
     private var moved = false
     private var longPressTriggered = false
+    private var movePending = false
 
     /** 摇杆可视半径（px） */
     private val baseRadius: Float
@@ -100,6 +107,10 @@ class JoystickView(
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
                 downY = event.y
+                downRawX = event.rawX
+                downRawY = event.rawY
+                startX = key.x
+                startY = key.y
                 moved = false
                 longPressTriggered = false
                 if (editing) {
@@ -114,16 +125,22 @@ class JoystickView(
 
             MotionEvent.ACTION_MOVE -> {
                 if (editing) {
-                    val dx = event.x - downX
-                    val dy = event.y - downY
-                    if (abs(dx) > 8 || abs(dy) > 8) {
+                    val dx = event.rawX - downRawX
+                    val dy = event.rawY - downRawY
+                    if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
                         moved = true
                         handler.removeCallbacks(longPressRunnable)
-                        val screenX = (x + event.x) / screenW
-                        val screenY = (y + event.y) / screenH
-                        key.x = screenX
-                        key.y = screenY
-                        OverlayService.instance?.moveKeyWindow(this, screenX, screenY)
+                    }
+                    if (moved) {
+                        key.x = (startX + dx / screenW).coerceIn(0f, 1f)
+                        key.y = (startY + dy / screenH).coerceIn(0f, 1f)
+                        if (!movePending) {
+                            movePending = true
+                            postOnAnimation {
+                                movePending = false
+                                OverlayService.instance?.moveKeyWindow(this, key.x, key.y)
+                            }
+                        }
                     }
                 } else {
                     // 摇杆偏移（限制在可视半径内）

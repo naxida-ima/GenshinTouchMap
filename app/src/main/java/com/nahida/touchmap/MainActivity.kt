@@ -3,10 +3,12 @@ package com.nahida.touchmap
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -44,6 +46,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,10 +58,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.nahida.touchmap.data.ConfigStore
+import com.nahida.touchmap.mapper.EngineManager
+import com.nahida.touchmap.model.KeyShape
 import com.nahida.touchmap.model.KeyType
 import com.nahida.touchmap.model.VirtualKey
 import com.nahida.touchmap.overlay.OverlayService
 import kotlinx.coroutines.launch
+import rikka.shizuku.Shizuku
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,11 +102,47 @@ private fun MainScreen() {
     var editMode by remember { mutableStateOf(false) }
     var running by remember { mutableStateOf(OverlayService.isRunning()) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var shizukuEnabled by remember { mutableStateOf(EngineManager.isShizukuEnabled()) }
+    var engineName by remember { mutableStateOf(EngineManager.engineName()) }
 
     // 收集配置流
     LaunchedEffect(Unit) {
         launch { ConfigStore.keysFlow(context).collect { keys = it } }
         launch { ConfigStore.editModeFlow(context).collect { editMode = it } }
+    }
+
+    // Shizuku 授权结果监听
+    DisposableEffect(Unit) {
+        val listener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                EngineManager.enableShizuku()
+                shizukuEnabled = EngineManager.isShizukuEnabled()
+                engineName = EngineManager.engineName()
+                Toast.makeText(context, "Shizuku 引擎已启用", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Shizuku 授权被拒绝，将继续使用无障碍引擎", Toast.LENGTH_SHORT).show()
+            }
+        }
+        Shizuku.addRequestPermissionResultListener(listener)
+        onDispose { Shizuku.removeRequestPermissionResultListener(listener) }
+    }
+
+    fun requestShizuku() {
+        val granted = runCatching {
+            !Shizuku.isPreV11() &&
+                    Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+        if (granted) {
+            EngineManager.enableShizuku()
+            shizukuEnabled = EngineManager.isShizukuEnabled()
+            engineName = EngineManager.engineName()
+            Toast.makeText(context, "Shizuku 引擎已启用（多指更流畅）", Toast.LENGTH_SHORT).show()
+        } else {
+            runCatching { Shizuku.requestPermission(1001) }
+                .onFailure {
+                    Toast.makeText(context, "Shizuku 未运行，请先启动 Shizuku 应用", Toast.LENGTH_SHORT).show()
+                }
+        }
     }
 
     // 请求通知权限（Android 13+）
@@ -133,6 +175,29 @@ private fun MainScreen() {
 
             // 权限状态
             PermissionRow(context)
+            Spacer(Modifier.height(8.dp))
+
+            // 注入引擎
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("注入引擎：${EngineManager.engineName()}", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (shizukuEnabled) "Shizuku 注入（多指流畅、低延迟，推荐）"
+                            else "无障碍模拟（开箱即用，多指有轻微打断）",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    if (!shizukuEnabled) {
+                        TextButton(onClick = { requestShizuku() }) { Text("启用 Shizuku") }
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
 
             // 服务开关
@@ -206,9 +271,10 @@ private fun MainScreen() {
 
     if (showAddDialog) {
         AddKeyDialog(
-            onConfirm = { type, label ->
+            onConfirm = { type, shape, label ->
                 val newKey = VirtualKey(
                     type = type,
+                    shape = shape,
                     label = label,
                     x = 0.5f,
                     y = 0.5f
@@ -305,10 +371,11 @@ private fun KeyRow(key: VirtualKey, onDelete: () -> Unit) {
 
 @Composable
 private fun AddKeyDialog(
-    onConfirm: (KeyType, String) -> Unit,
+    onConfirm: (KeyType, KeyShape, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var selectedType by remember { mutableStateOf(KeyType.TAP) }
+    var selectedShape by remember { mutableStateOf(KeyShape.CIRCLE) }
     var label by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -336,11 +403,31 @@ private fun AddKeyDialog(
                         Text(desc)
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                Text("按键形状（虚拟层与游戏层标记同形状）", style = MaterialTheme.typography.bodySmall)
+                listOf(
+                    KeyShape.CIRCLE to "圆形",
+                    KeyShape.RECTANGLE to "矩形（适合切枪等按键）"
+                ).forEach { (shape, desc) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(
+                            selected = selectedShape == shape,
+                            onClick = { selectedShape = shape }
+                        )
+                        Text(desc)
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(selectedType, label.ifBlank { if (selectedType == KeyType.JOYSTICK) "摇杆" else "按键" }) }
+                onClick = {
+                    onConfirm(
+                        selectedType,
+                        selectedShape,
+                        label.ifBlank { if (selectedType == KeyType.JOYSTICK) "摇杆" else "按键" }
+                    )
+                }
             ) { Text("创建") }
         },
         dismissButton = {

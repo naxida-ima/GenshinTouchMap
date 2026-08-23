@@ -66,4 +66,8 @@ dependencies {
 
     // 协程
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Shizuku（高权限系统服务调用：输入注入引擎 B）
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }

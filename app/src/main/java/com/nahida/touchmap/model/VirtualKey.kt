@@ -17,6 +17,15 @@ enum class KeyType {
 }
 
 /**
+ * 按键形状（虚拟层与游戏层目标标记同形状）
+ */
+@Serializable
+enum class KeyShape {
+    @SerialName("CIRCLE") CIRCLE,
+    @SerialName("RECTANGLE") RECTANGLE
+}
+
+/**
  * 一个虚拟按键/摇杆。
  * 所有坐标均为「相对屏幕的百分比」（0f ~ 1f），适配任意分辨率。
  */
@@ -24,6 +33,7 @@ enum class KeyType {
 data class VirtualKey(
     val id: String = java.util.UUID.randomUUID().toString(),
     val type: KeyType = KeyType.TAP,
+    val shape: KeyShape = KeyShape.CIRCLE,
     var label: String = "按键",
     /** overlay 上的位置（百分比） */
     var x: Float = 0.5f,

@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.view.Gravity
@@ -15,7 +16,8 @@ import android.view.WindowManager
 import android.widget.Toast
 import com.nahida.touchmap.R
 import com.nahida.touchmap.data.ConfigStore
-import com.nahida.touchmap.mapper.TouchMapperService
+import com.nahida.touchmap.mapper.EngineManager
+import com.nahida.touchmap.model.KeyShape
 import com.nahida.touchmap.model.KeyType
 import com.nahida.touchmap.model.VirtualKey
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +70,8 @@ class OverlayService : Service() {
     private var keys: MutableList<VirtualKey> = mutableListOf()
     /** 每个按键对应的悬浮窗口 */
     private val keyWindows = mutableListOf<Pair<VirtualKey, View>>()
+    /** 编辑模式下，每个按键对应的目标标记窗口 */
+    private val targetWindows = mutableListOf<Pair<VirtualKey, View>>()
     private var floatBallView: View? = null
     private var pickerView: View? = null
     private var editing = false
@@ -106,11 +110,26 @@ class OverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** 屏幕旋转 / 尺寸变化：重读屏幕尺寸并重建全部窗口（坐标均为百分比，天然适配） */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val real = android.graphics.Point()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealSize(real)
+        if (real.x > 0 && real.y > 0) {
+            screenW = real.x
+            screenH = real.y
+        }
+        rebuildAll()
+    }
+
     // ---------- 窗口管理 ----------
 
     private fun removeAllWindows() {
         keyWindows.forEach { (_, v) -> runCatching { wm.removeView(v) } }
         keyWindows.clear()
+        targetWindows.forEach { (_, v) -> runCatching { wm.removeView(v) } }
+        targetWindows.clear()
         runCatching { floatBallView?.let { wm.removeView(it) } }
         floatBallView = null
         runCatching { pickerView?.let { wm.removeView(it) } }
@@ -139,9 +158,35 @@ class OverlayService : Service() {
                 KeyButtonView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest)
             }
             addKeyWindow(v, key)
+            // 编辑模式：在游戏层映射目标位置显示同形状标记（两层可视化）
+            if (editing && key.targetX >= 0f) {
+                addTargetWindow(key)
+            }
         }
         // 悬浮球
         addFloatBall()
+    }
+
+    /** 目标标记窗口：显示在原神对应按键的位置（不可交互，仅可视化） */
+    private fun addTargetWindow(key: VirtualKey) {
+        val sizePx = key.size.dp(this)
+        val marker = TargetMarkerView(this, key)
+        val params = WindowManager.LayoutParams(
+            sizePx,
+            sizePx,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = (key.targetX * screenW - sizePx / 2f).roundToInt()
+        params.y = (key.targetY * screenH - sizePx / 2f).roundToInt()
+        runCatching {
+            wm.addView(marker, params)
+            targetWindows.add(key to marker)
+        }
     }
 
     private fun addKeyWindow(view: View, key: VirtualKey) {
@@ -203,9 +248,9 @@ class OverlayService : Service() {
      * @param type press / move / release / tap
      */
     private fun onKeyEvent(key: VirtualKey, fingerId: Int, type: String, x: Float, y: Float) {
-        val injector = TouchMapperService.instance
+        val injector = EngineManager.current()
         if (injector == null) {
-            Toast.makeText(this, "无障碍服务未开启，无法模拟触摸", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "无可用注入引擎（无障碍未开启，Shizuku 未授权）", Toast.LENGTH_SHORT).show()
             return
         }
         when (type) {

@@ -4,19 +4,21 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
+import com.nahida.touchmap.model.KeyShape
 import com.nahida.touchmap.model.KeyType
 import com.nahida.touchmap.model.VirtualKey
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /**
  * 虚拟按键控件（独立悬浮窗口）。
  * - 运行模式：TAP 点击 / HOLD 按住，注入模拟触摸
- * - 编辑模式：拖动移动位置；长按进入选点模式设置映射目标
+ * - 编辑模式：拖动移动位置（raw 绝对坐标计算，保证跟手且不抽搐）；长按进入选点模式
  */
 class KeyButtonView(
     context: Context,
@@ -31,10 +33,16 @@ class KeyButtonView(
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val handler = Handler(Looper.getMainLooper())
-    private var downX = 0f
-    private var downY = 0f
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+
+    // 编辑模式拖动状态（基于 raw 绝对坐标，不依赖 View.x 避免累加误差）
+    private var downRawX = 0f
+    private var downRawY = 0f
+    private var startX = 0f
+    private var startY = 0f
     private var moved = false
     private var longPressTriggered = false
+    private var movePending = false
 
     private val longPressRunnable = Runnable {
         if (editing) {
@@ -53,38 +61,41 @@ class KeyButtonView(
         val cy = height / 2f
         val r = minOf(width, height) / 2f - 4f
 
-        // 背景圆
         paint.style = Paint.Style.FILL
-        paint.color = if (key.type == KeyType.HOLD) 0x66FF9800 else 0x6600BFFF
-        canvas.drawCircle(cx, cy, r, paint)
+        paint.color = if (key.type == KeyType.HOLD) 0x66FF9800.toInt() else 0x6600BFFF.toInt()
 
-        // 描边
+        if (key.shape == KeyShape.RECTANGLE) {
+            val rect = RectF(cx - r, cy - r, cx + r, cy + r)
+            canvas.drawRoundRect(rect, 10f, 10f, paint)
+        } else {
+            canvas.drawCircle(cx, cy, r, paint)
+        }
+
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 3f
         paint.color = Color.WHITE
-        canvas.drawCircle(cx, cy, r, paint)
+        if (key.shape == KeyShape.RECTANGLE) {
+            val rect = RectF(cx - r, cy - r, cx + r, cy + r)
+            canvas.drawRoundRect(rect, 10f, 10f, paint)
+        } else {
+            canvas.drawCircle(cx, cy, r, paint)
+        }
 
         // 标签
         paint.style = Paint.Style.FILL
         paint.color = Color.WHITE
         paint.textSize = 13f * resources.displayMetrics.density
         paint.textAlign = Paint.Align.CENTER
-        val text = if (editing) "${key.label}•🎯" else key.label
-        canvas.drawText(text, cx, cy + paint.textSize / 3f, paint)
-
-        // 编辑模式：画映射目标指示线
-        if (editing && key.targetX >= 0f) {
-            paint.color = 0x88FF5722.toInt()
-            paint.strokeWidth = 2f
-            canvas.drawLine(cx, cy, key.targetX * screenW - x, key.targetY * screenH - y, paint)
-        }
+        canvas.drawText(if (editing) "${key.label}•🎯" else key.label, cx, cy + paint.textSize / 3f, paint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                downX = event.x
-                downY = event.y
+                downRawX = event.rawX
+                downRawY = event.rawY
+                startX = key.x
+                startY = key.y
                 moved = false
                 longPressTriggered = false
                 if (editing) {
@@ -97,17 +108,24 @@ class KeyButtonView(
 
             MotionEvent.ACTION_MOVE -> {
                 if (editing) {
-                    val dx = event.x - downX
-                    val dy = event.y - downY
-                    if (abs(dx) > 8 || abs(dy) > 8) {
+                    val dx = event.rawX - downRawX
+                    val dy = event.rawY - downRawY
+                    if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
                         moved = true
                         handler.removeCallbacks(longPressRunnable)
-                        // 拖动：更新窗口位置（视图坐标 -> 屏幕百分比）
-                        val screenX = (x + event.x) / screenW
-                        val screenY = (y + event.y) / screenH
-                        key.x = screenX
-                        key.y = screenY
-                        OverlayService.instance?.moveKeyWindow(this, screenX, screenY)
+                    }
+                    if (moved) {
+                        // raw 绝对坐标：起始位置 + 手指偏移，绝对跟手
+                        key.x = (startX + dx / screenW).coerceIn(0f, 1f)
+                        key.y = (startY + dy / screenH).coerceIn(0f, 1f)
+                        // 帧节流：每帧最多更新一次窗口位置
+                        if (!movePending) {
+                            movePending = true
+                            postOnAnimation {
+                                movePending = false
+                                OverlayService.instance?.moveKeyWindow(this, key.x, key.y)
+                            }
+                        }
                     }
                 }
                 return true
@@ -119,7 +137,6 @@ class KeyButtonView(
                     if (moved) {
                         OverlayService.instance?.saveKeys()
                     }
-                    // 选点已触发或单击：忽略
                 } else {
                     triggerUp()
                 }
@@ -137,10 +154,8 @@ class KeyButtonView(
 
     private fun triggerDown() {
         if (key.type == KeyType.HOLD) {
-            // 长按：按住期间持续按压
             onKeyEvent(key, fingerId, "press", targetXPx(), targetYPx())
         } else {
-            // 点击：press + 延迟 release
             onKeyEvent(key, fingerId, "tap", targetXPx(), targetYPx())
         }
     }
