@@ -10,11 +10,9 @@ object EngineManager {
     @Volatile
     private var shizukuInjector: ShizukuInjector? = null
 
-    /** 用户选择：true = Shizuku，false = 无障碍。
-     *  默认无障碍：Shizuku 的 injectInputEvent 会触发 ColorOS 触摸仲裁（取消真实触摸 → 长按失效），
-     *  无障碍 dispatchGesture 走不同注入通道，长按正常（实测验证）。 */
+    /** 用户选择：true = Shizuku（默认，用户指定只用 Shizuku），false = 无障碍 */
     @Volatile
-    var useShizuku = false
+    var useShizuku = true
 
     /** 尝试初始化 Shizuku 引擎（需已授权；失败则保持可用状态为 false） */
     fun enableShizuku() {
