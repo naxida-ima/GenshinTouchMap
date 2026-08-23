@@ -41,6 +41,9 @@ class OverlayService : Service() {
         private const val CHANNEL_ID = "touchmap_overlay_channel"
         private const val NOTIF_ID = 1001
 
+        /** 按键窗口触摸余量（dp）：每边扩大，防长按时手指滑出窗口触发 CANCEL */
+        private const val TOUCH_PAD = 28
+
         @Volatile
         var instance: OverlayService? = null
 
@@ -192,8 +195,10 @@ class OverlayService : Service() {
     }
 
     private fun addKeyWindow(view: View, key: VirtualKey) {
-        val wPx = key.width.dp(this)
-        val hPx = key.height.dp(this)
+        // 触摸余量：窗口比可视区每边大 TOUCH_PAD，防止长按时手指微动滑出窗口触发 CANCEL（长按变点按）
+        val padPx = TOUCH_PAD.dp(this)
+        val wPx = key.width.dp(this) + padPx * 2
+        val hPx = key.height.dp(this) + padPx * 2
         val params = WindowManager.LayoutParams(
             wPx,
             hPx,
@@ -215,13 +220,14 @@ class OverlayService : Service() {
 
     private fun addFloatBall() {
         val sizePx = 56.dp(this)
+        val padPx = TOUCH_PAD.dp(this)
         val ball = FloatBallView(this, sizePx, editing) {
             // 悬浮球点击：切换编辑/运行模式
             setEditMode(!editing)
         }
         val params = WindowManager.LayoutParams(
-            sizePx,
-            sizePx,
+            sizePx + padPx * 2,
+            sizePx + padPx * 2,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
@@ -231,7 +237,7 @@ class OverlayService : Service() {
         )
         params.gravity = Gravity.TOP or Gravity.START
         // 悬浮球默认在右侧中部略下（避开右上角挖孔等异形区域）
-        params.x = screenW - sizePx - 20.dp(this)
+        params.x = screenW - sizePx - padPx - 20.dp(this)
         params.y = (screenH * 0.55f - sizePx / 2f).roundToInt()
         runCatching {
             wm.addView(ball, params)
@@ -294,7 +300,9 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            // LAYOUT_IN_SCREEN：遮罩铺满物理屏幕，点击坐标与 screenW/H 基准一致（否则偏上差一个状态栏）
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
@@ -344,8 +352,9 @@ class OverlayService : Service() {
     fun resizeKeyWindow(view: View, widthDp: Float, heightDp: Float) {
         val pair = keyWindows.firstOrNull { it.second === view } ?: return
         val key = pair.first
-        val wPx = widthDp.dp(this)
-        val hPx = heightDp.dp(this)
+        val padPx = TOUCH_PAD.dp(this)
+        val wPx = widthDp.dp(this) + padPx * 2
+        val hPx = heightDp.dp(this) + padPx * 2
         val params = view.layoutParams as WindowManager.LayoutParams
         val cx = key.x * screenW
         val cy = key.y * screenH
@@ -394,7 +403,8 @@ class FloatBallView(
         super.onDraw(canvas)
         val cx = width / 2f
         val cy = height / 2f
-        canvas.drawCircle(cx, cy, minOf(width, height) / 2f - 2f, paint)
+        // 按可视尺寸绘制（窗口含触摸余量 padding）
+        canvas.drawCircle(cx, cy, sizePx / 2f - 2f, paint)
         paint.color = android.graphics.Color.WHITE
         canvas.drawText(if (editing) "运" else "编", cx, cy + paint.textSize / 3f, paint)
     }

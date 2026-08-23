@@ -72,15 +72,20 @@ class KeyButtonView(
 
     private fun isInHandleArea(e: MotionEvent): Boolean {
         val handleSize = 36f * density
-        return e.x > width - handleSize && e.y > height - handleSize
+        val cx = width / 2f
+        val cy = height / 2f
+        val rw = key.width * density / 2f
+        val rh = key.height * density / 2f
+        return e.x > cx + rw - handleSize && e.y > cy + rh - handleSize
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val cx = width / 2f
         val cy = height / 2f
-        val rw = max(0f, width / 2f - 4f)
-        val rh = max(0f, height / 2f - 4f)
+        // 可视尺寸（排除触摸余量 padding，内容居中绘制）
+        val rw = max(0f, key.width * density / 2f - 4f)
+        val rh = max(0f, key.height * density / 2f - 4f)
 
         paint.style = Paint.Style.FILL
         paint.color = if (key.type == KeyType.HOLD) 0x66FF9800.toInt() else 0x6600BFFF.toInt()
@@ -106,15 +111,15 @@ class KeyButtonView(
         paint.textAlign = Paint.Align.CENTER
         canvas.drawText(if (editing) "${key.label}•🎯" else key.label, cx, cy + paint.textSize / 3f, paint)
 
-        // 编辑模式：右下角缩放把手
+        // 编辑模式：右下角缩放把手（可视区右下角）
         if (editing) {
             val hs = 14f * density
             paint.style = Paint.Style.FILL
             paint.color = 0xCC00E676.toInt()
-            canvas.drawCircle(width - hs, height - hs, hs, paint)
+            canvas.drawCircle(cx + rw, cy + rh, hs, paint)
             paint.strokeWidth = 2f
             paint.color = Color.WHITE
-            canvas.drawLine(width - hs * 1.6f, height - hs * 0.5f, width - hs * 0.5f, height - hs * 1.6f, paint)
+            canvas.drawLine(cx + rw - hs * 1.1f, cy + rh - hs * 0.5f, cx + rw - hs * 0.5f, cy + rh - hs * 1.1f, paint)
         }
 
         // 编辑模式：未映射提示
@@ -122,7 +127,7 @@ class KeyButtonView(
             paint.style = Paint.Style.FILL
             paint.color = Color.parseColor("#FF5252")
             paint.textSize = 11f * density
-            canvas.drawText("未映射", cx, height + 14f * density, paint)
+            canvas.drawText("未映射", cx, cy + rh + 14f * density, paint)
         }
     }
 

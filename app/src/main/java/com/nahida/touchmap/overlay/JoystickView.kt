@@ -58,9 +58,9 @@ class JoystickView(
     private var longPressTriggered = false
     private var layoutPending = false
 
-    /** 摇杆可视半径（px） */
+    /** 摇杆可视半径（px）：按按键可视尺寸（排除触摸余量 padding） */
     private val baseRadius: Float
-        get() = minOf(width, height) / 2f - 8f
+        get() = minOf(key.width, key.height) / 2f * resources.displayMetrics.density - 8f
 
     /** 摇杆映射中心（像素） */
     private fun targetCX(): Float = if (key.targetX >= 0f) key.targetX * screenW else screenW / 2f
@@ -78,7 +78,9 @@ class JoystickView(
 
     private fun isInHandleArea(e: MotionEvent): Boolean {
         val handleSize = 36f * density
-        return e.x > width - handleSize && e.y > height - handleSize
+        val cx = width / 2f
+        val cy = height / 2f
+        return e.x > cx + baseRadius - handleSize && e.y > cy + baseRadius - handleSize
     }
 
     init {
@@ -109,7 +111,7 @@ class JoystickView(
         knobPaint.color = Color.WHITE
         canvas.drawCircle(cx + knobX, cy + knobY, knobR, knobPaint)
 
-        // 编辑模式：映射中心指示 + 缩放把手
+        // 编辑模式：映射中心指示 + 缩放把手（可视区右下角）
         if (editing) {
             basePaint.style = Paint.Style.STROKE
             basePaint.color = 0x88FF5722.toInt()
@@ -118,10 +120,10 @@ class JoystickView(
             val hs = 14f * density
             basePaint.style = Paint.Style.FILL
             basePaint.color = 0xCC00E676.toInt()
-            canvas.drawCircle(width - hs, height - hs, hs, basePaint)
+            canvas.drawCircle(cx + baseRadius, cy + baseRadius, hs, basePaint)
             basePaint.strokeWidth = 2f
             basePaint.color = Color.WHITE
-            canvas.drawLine(width - hs * 1.6f, height - hs * 0.5f, width - hs * 0.5f, height - hs * 1.6f, basePaint)
+            canvas.drawLine(cx + baseRadius - hs * 1.1f, cy + baseRadius - hs * 0.5f, cx + baseRadius - hs * 0.5f, cy + baseRadius - hs * 1.1f, basePaint)
         }
     }
 
