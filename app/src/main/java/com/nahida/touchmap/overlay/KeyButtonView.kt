@@ -133,7 +133,7 @@ class KeyButtonView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        android.util.Log.d("TouchMap", "KBV ${key.label} ${event.actionToString(event.actionMasked)} " +
+        android.util.Log.d("TouchMap", "KBV ${key.label} ${MotionEvent.actionToString(event.actionMasked)} " +
                 "t=${SystemClock.uptimeMillis()} x=${event.x.toInt()} y=${event.y.toInt()} raw=(${event.rawX.toInt()},${event.rawY.toInt()})")
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
