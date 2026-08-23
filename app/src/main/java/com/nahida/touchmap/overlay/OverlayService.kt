@@ -41,6 +41,7 @@ class OverlayService : Service() {
     companion object {
         private const val CHANNEL_ID = "touchmap_overlay_channel"
         private const val NOTIF_ID = 1001
+        private const val ACTION_TOGGLE_EDIT = "com.nahida.touchmap.TOGGLE_EDIT"
 
         /** 按键窗口触摸余量（dp）：每边扩大，防长按时手指滑出窗口触发 CANCEL */
         private const val TOUCH_PAD = 28
@@ -155,6 +156,10 @@ class OverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification())
         instance = this
+        // 通知栏「编辑模式」切换
+        if (intent?.action == ACTION_TOGGLE_EDIT) {
+            setEditMode(!editing)
+        }
         scope.launch {
             editing = ConfigStore.editModeFlow(this@OverlayService).first()
         }
@@ -231,8 +236,6 @@ class OverlayService : Service() {
                 addTargetWindow(key)
             }
         }
-        // 悬浮球
-        addFloatBall()
     }
 
     /**
@@ -354,7 +357,8 @@ class OverlayService : Service() {
         if (editing == edit) return
         editing = edit
         scope.launch { ConfigStore.setEditMode(this@OverlayService, edit) }
-        Toast.makeText(this, if (edit) "编辑模式：拖动移动位置，长按设置映射目标" else "运行模式", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (edit) "编辑模式：拖动移动位置，右下角把手调大小" else "运行模式", Toast.LENGTH_SHORT).show()
+        startForeground(NOTIF_ID, buildNotification())
         rebuildAll()
     }
 
@@ -455,11 +459,26 @@ class OverlayService : Service() {
             )
             nm.createNotificationChannel(ch)
         }
+        // 通知栏「编辑模式」切换按钮（替代原悬浮球）
+        val toggleIntent = Intent(this, OverlayService::class.java).apply {
+            action = ACTION_TOGGLE_EDIT
+        }
+        val togglePI = PendingIntent.getService(
+            this, 0, toggleIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.overlay_notification_title))
-            .setContentText(getString(R.string.overlay_notification_text))
+            .setContentText(if (editing) "编辑模式（点此切换回运行模式）" else "运行模式（点此切换编辑模式）")
             .setSmallIcon(android.R.drawable.ic_menu_edit)
             .setOngoing(true)
+            .addAction(
+                Notification.Action.Builder(
+                    android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_menu_edit),
+                    if (editing) "切到运行" else "切到编辑",
+                    togglePI
+                ).build()
+            )
             .build()
     }
 
