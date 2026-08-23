@@ -31,7 +31,9 @@ class KeyButtonView(
     private val screenW: Int,
     private val screenH: Int,
     private val onKeyEvent: (VirtualKey, Int, String, Float, Float) -> Unit,
-    private val onPickRequest: (VirtualKey) -> Unit
+    private val onPickRequest: (VirtualKey) -> Unit,
+    /** 双机发射模式：press/release 只发 keyId+手势，坐标置 0（接收端按配置换算） */
+    private val remoteMode: Boolean = false
 ) : View(context) {
 
     companion object {
@@ -68,16 +70,20 @@ class KeyButtonView(
         alpha = key.opacity
     }
 
-    /** 运行模式：按下注入目标点；编辑模式不注入 */
+    /** 运行模式：按下注入目标点；编辑模式不注入；发射模式只发 keyId */
     private fun triggerDown() {
         if (editing) return
+        if (remoteMode) {
+            onKeyEvent(key, fingerId, "press", 0f, 0f)
+            return
+        }
         if (key.targetX < 0f || key.targetY < 0f) return
         val tx = key.targetX * screenW
         val ty = key.targetY * screenH
         onKeyEvent(key, fingerId, "press", tx, ty)
     }
 
-    /** 运行模式：抬起注入释放；编辑模式不注入 */
+    /** 运行模式：抬起注入释放；编辑模式不注入；发射模式只发 keyId */
     private fun triggerUp() {
         if (editing) return
         onKeyEvent(key, fingerId, "release", 0f, 0f)

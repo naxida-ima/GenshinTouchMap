@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,6 +64,9 @@ import com.nahida.touchmap.model.KeyShape
 import com.nahida.touchmap.model.KeyType
 import com.nahida.touchmap.model.VirtualKey
 import com.nahida.touchmap.overlay.OverlayService
+import com.nahida.touchmap.remote.RemoteKey
+import com.nahida.touchmap.remote.RemoteKeyStore
+import com.nahida.touchmap.remote.RemoteServerHolder
 import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 
@@ -104,6 +108,8 @@ private fun MainScreen() {
     var showAddDialog by remember { mutableStateOf(false) }
     var shizukuReady by remember { mutableStateOf(EngineManager.isShizukuReady()) }
     var useShizuku by remember { mutableStateOf(EngineManager.useShizuku) }
+    // 模式：0=本机 1=发射 2=接收（sender 精简版只有发射）
+    var mode by remember { mutableStateOf(if (BuildConfig.IS_FULL) 0 else 1) }
 
     // 收集配置流
     LaunchedEffect(Unit) {
@@ -166,11 +172,27 @@ private fun MainScreen() {
         ) {
             Text("提瓦特触控映射", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "把 FPS 习惯的按键布局，覆盖到原神上。多指 + 摇杆 + 自定义按键",
+                "双机触控：发射端（虚拟按键）+ 接收端（注入游戏），彻底避开触摸仲裁",
                 style = MaterialTheme.typography.bodySmall
             )
             Spacer(Modifier.height(12.dp))
 
+            // 模式切换
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ModeButton("本机模式", mode == 0) { mode = 0 }
+                ModeButton("发射模式", mode == 1) { mode = 1 }
+                if (BuildConfig.IS_FULL) {
+                    ModeButton("接收模式", mode == 2) { mode = 2 }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            when (mode) {
+                0 -> {
+                    // ===== 本机模式 =====
             // 权限状态
             PermissionRow(context)
             Spacer(Modifier.height(8.dp))
@@ -281,6 +303,13 @@ private fun MainScreen() {
                 Spacer(Modifier.width(4.dp))
                 Text("新建按键 / 摇杆")
             }
+                }
+                // ===== 本机模式结束 =====
+
+                1 -> SenderTabContent(context, scope)
+
+                2 -> if (BuildConfig.IS_FULL) ReceiverTabContent(context)
+            }
         }
     }
 
@@ -291,6 +320,7 @@ private fun MainScreen() {
                     type = type,
                     shape = shape,
                     label = label,
+                    keyId = keys.size,
                     x = 0.5f,
                     y = 0.5f
                 )
@@ -302,6 +332,226 @@ private fun MainScreen() {
             },
             onDismiss = { showAddDialog = false }
         )
+    }
+}
+
+@Composable
+private fun ModeButton(text: String, selected: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = if (selected) {
+            androidx.compose.material3.ButtonDefaults.buttonColors()
+        } else {
+            androidx.compose.material3.ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    ) { Text(text, style = MaterialTheme.typography.labelMedium) }
+}
+
+/** 发射端（操作层）：连接接收端，触摸转发远端 */
+@Composable
+private fun SenderTabContent(context: Context, scope: CoroutineScope) {
+    var ip by remember { mutableStateOf("192.168.1.100") }
+    var port by remember { mutableStateOf("7890") }
+    var connected by remember { mutableStateOf(false) }
+    var keys by remember { mutableStateOf<List<VirtualKey>>(emptyList()) }
+    var editMode by remember { mutableStateOf(false) }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        launch { ConfigStore.keysFlow(context).collect { keys = it } }
+        launch { ConfigStore.editModeFlow(context).collect { editMode = it } }
+    }
+
+    Column {
+        Text("发射端（操作层）", style = MaterialTheme.typography.titleMedium)
+        Text("本机显示虚拟按键，触摸实时转发给接收端注入游戏", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = ip,
+            onValueChange = { ip = it },
+            label = { Text("接收端 IP") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = port,
+            onValueChange = { port = it },
+            label = { Text("端口") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = {
+                context.startForegroundService(Intent(context, OverlayService::class.java))
+                OverlayService.startRemoteMode(ip.trim(), port.toIntOrNull() ?: 7890)
+                connected = true
+                Toast.makeText(context, "发射层已启动，请确保接收端已监听", Toast.LENGTH_SHORT).show()
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("连接并启动发射层") }
+        TextButton(
+            onClick = {
+                OverlayService.stopRemoteMode()
+                context.stopService(Intent(context, OverlayService::class.java))
+                connected = false
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("断开") }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("编辑模式（拖动位置 / 长按选点 / 右下角调大小）", modifier = Modifier.weight(1f))
+            Switch(
+                checked = editMode,
+                onCheckedChange = { e ->
+                    scope.launch { ConfigStore.setEditMode(context, e) }
+                    OverlayService.setEditModeExternal(e)
+                }
+            )
+        }
+        Text("发射按键（${keys.size}）—— 编号 #N = keyId，须与接收端配置一致（0=摇杆 1=攻击 2=跳跃…）", style = MaterialTheme.typography.bodySmall)
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(keys, key = { it.id }) { key ->
+                KeyRow(key = key, onDelete = {
+                    scope.launch {
+                        ConfigStore.saveKeys(context, keys.filterNot { it.id == key.id })
+                        OverlayService.refresh()
+                    }
+                })
+            }
+        }
+        Button(
+            onClick = { showAddDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Spacer(Modifier.width(4.dp))
+            Text("新建发射按键 / 摇杆")
+        }
+    }
+
+    if (showAddDialog) {
+        AddKeyDialog(
+            onConfirm = { type, shape, label ->
+                val newKey = VirtualKey(
+                    type = type,
+                    shape = shape,
+                    label = label,
+                    keyId = keys.size,
+                    x = 0.5f,
+                    y = 0.5f
+                )
+                scope.launch {
+                    ConfigStore.saveKeys(context, keys + newKey)
+                    OverlayService.refresh()
+                }
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
+    }
+}
+
+/** 接收端（注入层）：监听发射端指令，Shizuku 注入游戏 */
+@Composable
+private fun ReceiverTabContent(context: Context) {
+    val scope = rememberCoroutineScope()
+    var port by remember { mutableStateOf("7890") }
+    var listening by remember { mutableStateOf(RemoteServerHolder.listening) }
+    var connected by remember { mutableStateOf(RemoteServerHolder.connected) }
+    var remoteKeys by remember { mutableStateOf<List<RemoteKey>>(emptyList()) }
+    var shizukuReady by remember { mutableStateOf(EngineManager.isShizukuReady()) }
+
+    LaunchedEffect(Unit) {
+        launch { RemoteKeyStore.keysFlow(context).collect { remoteKeys = it } }
+    }
+
+    Column {
+        Text("接收端（注入层）", style = MaterialTheme.typography.titleMedium)
+        Text("监听发射端指令 → Shizuku 注入游戏。游戏设备无真实触摸 → 无仲裁，长按/多指稳定", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(8.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("注入引擎：${EngineManager.engineName()}（${if (shizukuReady) "可用" else "不可用"}）", style = MaterialTheme.typography.titleSmall)
+                Text(EngineManager.engineDescription(), style = MaterialTheme.typography.bodySmall)
+                if (!shizukuReady) {
+                    TextButton(onClick = {
+                        runCatching { Shizuku.requestPermission(1002) }
+                            .onFailure { Toast.makeText(context, "Shizuku 未运行，请先启动", Toast.LENGTH_SHORT).show() }
+                    }) { Text("授权 Shizuku") }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = port,
+            onValueChange = { port = it },
+            label = { Text("监听端口") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = {
+                if (listening) {
+                    RemoteServerHolder.stop()
+                } else {
+                    RemoteServerHolder.start(context, port.toIntOrNull() ?: 7890)
+                }
+                listening = RemoteServerHolder.listening
+                connected = RemoteServerHolder.connected
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(if (listening) "停止监听" else "开始监听") }
+        Text(
+            if (connected) "● 发射端已连接" else "○ 等待发射端连接（同一 WiFi，IP:端口 $port）",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("按键注入点配置（预置原神模板，可调）", style = MaterialTheme.typography.titleSmall)
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(remoteKeys, key = { it.keyId }) { rk ->
+                RemoteKeyRow(rk, onSave = { updated ->
+                    scope.launch {
+                        RemoteKeyStore.saveKeys(context, remoteKeys.map { if (it.keyId == updated.keyId) updated else it })
+                    }
+                })
+            }
+        }
+    }
+}
+
+@Composable
+private fun RemoteKeyRow(key: RemoteKey, onSave: (RemoteKey) -> Unit) {
+    var x by remember(key.keyId) { mutableStateOf(key.targetX) }
+    var y by remember(key.keyId) { mutableStateOf(key.targetY) }
+    var radius by remember(key.keyId) { mutableStateOf(key.joystickRadius) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(
+                "#${key.keyId} ${key.name}${if (key.isJoystick) "（摇杆）" else ""}",
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text("X: ${"%.0f".format(x * 100)}%", style = MaterialTheme.typography.bodySmall)
+            Slider(value = x, onValueChange = { x = it; onSave(key.copy(targetX = x)) })
+            Text("Y: ${"%.0f".format(y * 100)}%", style = MaterialTheme.typography.bodySmall)
+            Slider(value = y, onValueChange = { y = it; onSave(key.copy(targetY = y)) })
+            if (key.isJoystick) {
+                Text("摇杆半径: ${"%.0f".format(radius * 100)}% 屏高", style = MaterialTheme.typography.bodySmall)
+                Slider(value = radius, onValueChange = { radius = it; onSave(key.copy(joystickRadius = radius)) }, valueRange = 0.05f..0.3f)
+            }
+        }
     }
 }
 
@@ -361,7 +611,7 @@ private fun KeyRow(key: VirtualKey, onDelete: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text(key.label, style = MaterialTheme.typography.titleSmall)
+                Text("${key.label}  #${key.keyId}", style = MaterialTheme.typography.titleSmall)
                 Text(
                     buildString {
                         append(if (key.type == KeyType.JOYSTICK) "摇杆" else "按键")

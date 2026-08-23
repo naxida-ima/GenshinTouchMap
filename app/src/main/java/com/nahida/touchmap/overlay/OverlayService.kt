@@ -63,6 +63,30 @@ class OverlayService : Service() {
         fun setEditModeExternal(edit: Boolean) {
             instance?.setEditMode(edit)
         }
+
+        /** 启动双机发射模式：连接接收端，触摸事件转发远端 */
+        fun startRemoteMode(host: String, port: Int) {
+            instance?.let { svc ->
+                svc.remoteMode = true
+                val client = com.nahida.touchmap.net.TouchClient(host, port) { connected ->
+                    if (!connected) {
+                        svc.remoteMode = false
+                        svc.remoteClient = null
+                    }
+                }
+                svc.remoteClient = client
+                client.connect()
+            }
+        }
+
+        /** 停止双机发射模式 */
+        fun stopRemoteMode() {
+            instance?.let { svc ->
+                svc.remoteMode = false
+                svc.remoteClient?.disconnect()
+                svc.remoteClient = null
+            }
+        }
     }
 
     private lateinit var wm: WindowManager
@@ -80,6 +104,13 @@ class OverlayService : Service() {
     private var pickerView: View? = null
     private var editing = false
     private var pickingKey: VirtualKey? = null
+
+    /** 双机发射模式：触摸事件转发给远端（发射端），不再本地注入 */
+    @Volatile
+    private var remoteMode = false
+
+    @Volatile
+    private var remoteClient: com.nahida.touchmap.net.TouchClient? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -157,9 +188,9 @@ class OverlayService : Service() {
         // 按键 / 摇杆窗口
         keys.forEachIndexed { index, key ->
             val v = if (key.type == KeyType.JOYSTICK) {
-                JoystickView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest)
+                JoystickView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest, remoteMode)
             } else {
-                KeyButtonView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest)
+                KeyButtonView(this, key, index, editing, screenW, screenH, ::onKeyEvent, ::onPickRequest, remoteMode)
             }
             addKeyWindow(v, key)
             // 编辑模式：在游戏层映射目标位置显示同形状标记（两层可视化）
@@ -261,8 +292,20 @@ class OverlayService : Service() {
      * @param type press / move / release / tap
      */
     private fun onKeyEvent(key: VirtualKey, fingerId: Int, type: String, x: Float, y: Float) {
-        android.util.Log.d("TouchMap", "onKeyEvent ${key.label} $type ($x,$y) t=${SystemClock.uptimeMillis()} " +
-                "engine=${EngineManager.engineName()} ready=${EngineManager.current() != null}")
+        android.util.Log.d("TouchMap", "onKeyEvent ${key.label} keyId=${key.keyId} $type ($x,$y) t=${SystemClock.uptimeMillis()} " +
+                "engine=${EngineManager.engineName()} ready=${EngineManager.current() != null} remote=$remoteMode")
+
+        // 双机发射模式：转发远端（keyId + 手势 + 向量坐标）
+        if (remoteMode) {
+            val client = remoteClient ?: return
+            when (type) {
+                "press" -> client.sendCmd(key.keyId, com.nahida.touchmap.net.TouchProtocol.ACTION_DOWN, x, y)
+                "move" -> client.sendCmd(key.keyId, com.nahida.touchmap.net.TouchProtocol.ACTION_MOVE, x, y)
+                "release" -> client.sendCmd(key.keyId, com.nahida.touchmap.net.TouchProtocol.ACTION_UP, x, y)
+            }
+            return
+        }
+
         val injector = EngineManager.current()
         if (injector == null) {
             Toast.makeText(this, "无可用注入引擎（无障碍未开启，Shizuku 未授权）", Toast.LENGTH_SHORT).show()

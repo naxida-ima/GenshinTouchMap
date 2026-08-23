@@ -32,7 +32,9 @@ class JoystickView(
     private val screenW: Int,
     private val screenH: Int,
     private val onKeyEvent: (VirtualKey, Int, String, Float, Float) -> Unit,
-    private val onPickRequest: (VirtualKey) -> Unit
+    private val onPickRequest: (VirtualKey) -> Unit,
+    /** 双机发射模式：move 发归一化向量（接收端按摇杆中心+半径换算） */
+    private val remoteMode: Boolean = false
 ) : View(context) {
 
     companion object {
@@ -94,12 +96,21 @@ class JoystickView(
 
     private fun triggerDown() {
         if (editing) return
+        if (remoteMode) {
+            onKeyEvent(key, fingerId, "press", 0f, 0f)
+            return
+        }
         if (key.targetX < 0f || key.targetY < 0f) return
         onKeyEvent(key, fingerId, "press", targetCX(), targetCY())
     }
 
     private fun triggerMove(ratioX: Float, ratioY: Float) {
         if (editing) return
+        if (remoteMode) {
+            // 发射端：发归一化向量，接收端按摇杆中心+半径换算
+            onKeyEvent(key, fingerId, "move", ratioX, ratioY)
+            return
+        }
         onKeyEvent(
             key, fingerId, "move",
             targetCX() + ratioX * targetRadiusPx(),

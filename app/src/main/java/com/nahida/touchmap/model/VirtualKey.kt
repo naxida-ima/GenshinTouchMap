@@ -36,6 +36,8 @@ data class VirtualKey(
     val type: KeyType = KeyType.TAP,
     val shape: KeyShape = KeyShape.CIRCLE,
     var label: String = "按键",
+    /** 双机模式：接收端注入点编号（0-255，对应接收端 RemoteKey 配置） */
+    var keyId: Int = 0,
     /** overlay 上的位置（百分比） */
     var x: Float = 0.5f,
     var y: Float = 0.5f,

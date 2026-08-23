@@ -17,8 +17,26 @@ android {
         // Android 13 (API 33) 及以上设备均可安装；targetSdk 用 2026 年最新
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.5.2"
+        versionCode = 15
+        versionName = "0.6.0"
+    }
+
+    // 双版本：
+    // - full 满血版：发射端 + 接收端 + 本机注入（全部功能）
+    // - sender 精简版：仅发射端（操作层），备用机低配专用
+    flavorDimensions += "mode"
+    productFlavors {
+        create("full") {
+            dimension = "mode"
+            versionNameSuffix = "-full"
+            buildConfigField("boolean", "IS_FULL", "true")
+        }
+        create("sender") {
+            dimension = "mode"
+            applicationIdSuffix = ".sender"
+            versionNameSuffix = "-sender"
+            buildConfigField("boolean", "IS_FULL", "false")
+        }
     }
 
     signingConfigs {
@@ -60,6 +78,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
