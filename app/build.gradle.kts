@@ -17,8 +17,8 @@ android {
         // Android 13 (API 33) 及以上设备均可安装；targetSdk 用 2026 年最新
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "0.7.2"
+        versionCode = 20
+        versionName = "0.7.3"
     }
 
     // 双版本：

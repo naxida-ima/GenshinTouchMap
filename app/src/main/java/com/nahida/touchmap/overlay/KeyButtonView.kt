@@ -231,12 +231,19 @@ class KeyButtonView(
             canvas.drawLine(cx + rw - hs * 1.1f, cy + rh - hs * 0.5f, cx + rw - hs * 0.5f, cy + rh - hs * 1.1f, paint)
         }
 
-        // 编辑模式：未映射提示
-        if (editing && key.targetX < 0f) {
-            paint.style = Paint.Style.FILL
-            paint.color = Color.parseColor("#FF5252")
-            paint.textSize = 11f * density
-            canvas.drawText("未映射", cx, cy + rh + 14f * density, paint)
+        // 编辑模式：手柄/发射模式显示键位编号；触摸模式显示未映射提示
+        if (editing) {
+            if (remoteMode) {
+                paint.style = Paint.Style.FILL
+                paint.color = 0xCC00E676.toInt()
+                paint.textSize = 11f * density
+                canvas.drawText("键位#${key.keyId}", cx, cy + rh + 14f * density, paint)
+            } else if (key.targetX < 0f) {
+                paint.style = Paint.Style.FILL
+                paint.color = Color.parseColor("#FF5252")
+                paint.textSize = 11f * density
+                canvas.drawText("未映射", cx, cy + rh + 14f * density, paint)
+            }
         }
     }
 
