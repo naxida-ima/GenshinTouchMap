@@ -11,8 +11,10 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import com.nahida.touchmap.model.KeyType
 import com.nahida.touchmap.model.VirtualKey
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * 虚拟按键控件（独立悬浮窗口）。
