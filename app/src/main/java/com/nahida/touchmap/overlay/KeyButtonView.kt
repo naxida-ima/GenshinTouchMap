@@ -55,6 +55,9 @@ class KeyButtonView(
     private var startH = 0f
     private var moved = false
 
+    /** 运行模式按下状态：保证 press 与 release 严格配对，杜绝重复注入 */
+    private var downActive = false
+
     private val longPressRunnable = Runnable {
         if (editing && gestureMode == MODE_MOVE) {
             onPickRequest(key)
@@ -108,7 +111,10 @@ class KeyButtonView(
                     }
                 } else {
                     gestureMode = MODE_NONE
-                    triggerDown()
+                    if (!downActive) {
+                        downActive = true
+                        triggerDown()
+                    }
                 }
                 return true
             }
@@ -159,7 +165,10 @@ class KeyButtonView(
                     if (moved && gestureMode == MODE_MOVE) save()
                     else if (gestureMode == MODE_RESIZE) save()
                 } else {
-                    triggerUp()
+                    if (downActive) {
+                        downActive = false
+                        triggerUp()
+                    }
                 }
                 gestureMode = MODE_NONE
                 return true

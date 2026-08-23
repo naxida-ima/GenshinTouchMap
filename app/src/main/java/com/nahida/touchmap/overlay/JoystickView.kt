@@ -60,6 +60,9 @@ class JoystickView(
     private var knobY = 0f
     private var moved = false
 
+    /** 运行模式按下状态：保证 press 与 release 严格配对 */
+    private var downActive = false
+
     /** 摇杆可视半径（px）：按按键可视尺寸（排除触摸余量 padding） */
     private val baseRadius: Float
         get() = minOf(key.width, key.height) / 2f * density - 8f
@@ -130,7 +133,10 @@ class JoystickView(
                     gestureMode = MODE_DRAG
                     knobX = 0f
                     knobY = 0f
-                    triggerDown()
+                    if (!downActive) {
+                        downActive = true
+                        triggerDown()
+                    }
                     invalidate()
                 }
                 return true
@@ -162,7 +168,10 @@ class JoystickView(
                     gestureMode = MODE_NONE
                     knobX = 0f
                     knobY = 0f
-                    triggerUp()
+                    if (downActive) {
+                        downActive = false
+                        triggerUp()
+                    }
                     invalidate()
                 }
                 gestureMode = MODE_NONE
