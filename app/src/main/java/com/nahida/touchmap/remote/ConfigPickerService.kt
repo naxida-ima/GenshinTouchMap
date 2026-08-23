@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
 class ConfigPickerService : Service() {
 
     companion object {
+        private const val CHANNEL_ID = "config_picker"
+
         @Volatile
         private var instance: ConfigPickerService? = null
 
@@ -136,10 +138,6 @@ class ConfigPickerService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_edit)
             .setOngoing(true)
             .build()
-    }
-
-    private companion object {
-        const val CHANNEL_ID = "config_picker"
     }
 }
 
