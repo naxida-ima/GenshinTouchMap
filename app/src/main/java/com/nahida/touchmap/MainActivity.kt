@@ -187,6 +187,7 @@ private fun MainScreen() {
             ) {
                 ModeButton("本机模式", mode == 0) { mode = 0 }
                 ModeButton("发射模式", mode == 1) { mode = 1 }
+                ModeButton("蓝牙手柄", mode == 3) { mode = 3 }
                 if (BuildConfig.IS_FULL) {
                     ModeButton("接收模式", mode == 2) { mode = 2 }
                 }
@@ -747,4 +748,6 @@ private fun AddKeyDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+)
 }

@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Android 13+ 通知（前台服务通知） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 蓝牙虚拟手柄（HID Device） -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application
         android:allowBackup="true"
